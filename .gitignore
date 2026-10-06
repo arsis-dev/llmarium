@@ -1,0 +1,15 @@
+.DS_Store
+.build/
+.swiftpm/
+DerivedData/
+build/
+dist/
+.local/
+models/
+logs/
+.env
+.env.*
+!.env.example
+*.gguf
+*.safetensors
+*.log
