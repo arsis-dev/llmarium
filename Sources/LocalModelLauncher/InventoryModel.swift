@@ -3,7 +3,7 @@ import ModelCore
 import SwiftUI
 
 enum Section: String, CaseIterable, Identifiable {
-    case running, engines, models, proxy, disk, memory
+    case running, engines, models, recipes, proxy, disk, memory
 
     var id: String { rawValue }
 
@@ -13,6 +13,7 @@ enum Section: String, CaseIterable, Identifiable {
         case .engines: "Moteurs"
         case .models: "Modèles"
         case .proxy: "Point d'entrée"
+        case .recipes: "Recettes"
         case .disk: "Disque"
         case .memory: "Mémoire"
         }
@@ -24,6 +25,7 @@ enum Section: String, CaseIterable, Identifiable {
         case .engines: "server.rack"
         case .models: "shippingbox"
         case .proxy: "arrow.triangle.branch"
+        case .recipes: "gauge.with.dots.needle.67percent"
         case .disk: "internaldrive"
         case .memory: "memorychip"
         }
@@ -85,6 +87,35 @@ final class InventoryModel: ObservableObject {
         }
         await refresh()
     }
+
+    /// Benchmarks in progress, by model id served.
+    @Published private(set) var benchmarking: [String: String] = [:]
+
+    func benchmark(_ target: HarnessTarget, running: RunningModel) async {
+        guard benchmarking[target.modelID] == nil, let snapshot else { return }
+        benchmarking[target.modelID] = "Échauffement"
+        defer { benchmarking[target.modelID] = nil }
+        let local = snapshot.models.first { target.engine == .omlx ? OMLXIdentity.matches(target.modelID, $0) : LaunchPlan.servedName($0) == target.modelID }
+        let id = target.modelID
+        // Straight to the engine, even when harnesses go through the proxy.
+        let result = await Benchmark.run(baseURL: running.baseURL ?? target.baseURL, model: target.modelID, engine: target.engine,
+                                         engineVersion: snapshot.engine(target.engine)?.installation.version, machine: snapshot.machine,
+                                         pid: running.pid, context: target.contextWindow,
+                                         recipeID: local.map { RecipeDeriver.effective(model: $0, engine: target.engine).id },
+                                         loadSeconds: LaunchRegistry.shared.servers().first { $0.pid == running.pid }?.loadSeconds,
+                                         otherClients: running.clients.map(\.title),
+                                         omlxURL: snapshot.engine(.omlx)?.instances.first?.url) { step in
+            Task { @MainActor in InventoryModel.shared.benchmarking[id] = step }
+        }
+        try? BenchmarkStore.shared.add(result)
+        benchmarkResults = BenchmarkStore.shared.all()
+        let decode = result.decodeTokensPerSecond.map { String(format: "%.1f", $0) } ?? "—"
+        launchOutcome = ActionOutcome(title: "Mesure de \(target.modelID) terminée",
+                                      message: "Génération \(decode) tokens/s, outil \(result.toolCallSucceeded == true ? "réussi" : "échoué")."
+                                        + (result.disturbed ? "\n\nMesure perturbée : \(result.conditions.joined(separator: " ; "))." : ""))
+    }
+
+    @Published var benchmarkResults = BenchmarkStore.shared.all()
 
     /// Result of the last unload or stop, shown until dismissed.
     @Published var outcome: ActionOutcome?

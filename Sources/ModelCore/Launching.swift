@@ -12,6 +12,8 @@ public struct LaunchedServer: Codable, Hashable, Sendable {
     public var context: Int?
     public var logPath: String
     public var arguments: [String]
+    /// Seconds from launch to the first answer of `/v1/models`.
+    public var loadSeconds: Int?
 }
 
 public final class LaunchRegistry: @unchecked Sendable {
@@ -91,7 +93,8 @@ public struct LaunchPlan: Equatable, Sendable {
     }
 
     /// MTPLX and mlx-serve serve the models of their own folder; both always listen on localhost only.
-    public static func make(model: LocalModel, engine: EngineKind, port: Int, context: Int?, installation: EngineInstallation) throws -> LaunchPlan {
+    public static func make(model: LocalModel, engine: EngineKind, port: Int, context: Int?, installation: EngineInstallation,
+                            recipe: Recipe? = nil) throws -> LaunchPlan {
         guard !model.isBrokenLink else { throw PlanError.brokenModel }
         guard let executable = installation.location else { throw PlanError.notInstalled(engine) }
         guard model.store == engine.store else { throw PlanError.wrongStore(engine) }
@@ -107,6 +110,7 @@ public struct LaunchPlan: Equatable, Sendable {
         case .omlx:
             throw PlanError.wrongStore(.omlx)
         }
+        arguments += recipe?.arguments(for: engine, existing: arguments) ?? []
         return LaunchPlan(engine: engine, executable: executable, arguments: arguments, port: port, context: context)
     }
 
@@ -173,7 +177,10 @@ public enum ModelLauncher {
             let (state, served) = await EngineDetector.probeModels(base: "http://127.0.0.1:\(plan.port)")
             if state == .ok, !served.isEmpty {
                 Thread.detachNewThread { waitpid(pid, nil, 0) }
-                return .ready(server, servedModels: served, seconds: Int(Date().timeIntervalSince(begin)))
+                var ready = server
+                ready.loadSeconds = Int(Date().timeIntervalSince(begin))
+                registry.add(ready)
+                return .ready(ready, servedModels: served, seconds: ready.loadSeconds ?? 0)
             }
         }
         Thread.detachNewThread { waitpid(pid, nil, 0) }

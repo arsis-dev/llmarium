@@ -136,6 +136,7 @@ struct RunningView: View {
 }
 
 struct RunningCard: View {
+    @EnvironmentObject private var model: InventoryModel
     var running: RunningModel
     var busy: Bool
     var targets: [HarnessTarget] = []
@@ -206,6 +207,15 @@ struct RunningCard: View {
                         }
                     }
                     .fixedSize()
+                }
+                if let target = targets.first, running.role.engine != nil {
+                    if let step = model.benchmarking[target.modelID] {
+                        ProgressView().controlSize(.small)
+                        Text(step).font(.callout).foregroundStyle(.secondary)
+                    } else {
+                        Button("Mesurer") { Task { await model.benchmark(target, running: running) } }
+                            .help("Banc d'essai : consigne courte, contexte d'environ 13K tokens, appel d'outil (une à trois minutes)")
+                    }
                 }
                 Spacer()
                 if busy { ProgressView().controlSize(.small) }

@@ -94,3 +94,15 @@ Port de test 18099, modèle `Qwen3.8-27B-Huihui-Abliterated-oQ6e-MTP-MLX` sur oM
 | Faux moteur en test, trois événements à 300 ms | ✅ reçus étalés, `model` réécrit, `Connection: close` |
 
 Non testé : une API distante réelle (aucune clé saisie), Watslog branché sur le proxy (bascule non faite).
+
+## Bancs d'essai — 9 octobre 2026
+
+| Modèle | Moteur | Génération | Lecture | 1er token | Outil | Contexte long | Pic mémoire | Conditions |
+|---|---|---|---|---|---|---|---|---|
+| Qwen3.8-27B-Huihui-Abliterated-oQ6e-MTP-MLX | oMLX 0.7.0 | 3,7 tok/s | 126 tok/s | 12,8 s | ✓ | ✓ | 70,9 Go (tout oMLX) | ⚠︎ Pi utilisait le même modèle |
+| Qwen3.5-4B-MTPLX-Optimized-Speed (`--reasoning off`) | MTPLX 2.11.3 | 33,1 tok/s | 1 690 tok/s | 0,23 s | ✓ | ✓ | 7,1 Go | ⚠︎ oMLX traitait une requête (GPU partagé) ; chargé en 10 s |
+
+- Référence omlx.ai pour le 27B sur M5 Max (64 Go, contexte 4K) : 23,4 tok/s en génération, 870 en lecture. L'écart avec la mesure d'oMLX vient du partage avec Pi : à refaire au calme.
+- La recette MTPLX `--reasoning off` est bien passée au serveur (`--reasoning-mode off`) et le banc n'a reçu aucun raisonnement.
+- Le serveur MTPLX lancé par l'app s'est arrêté en 2 s sur SIGTERM : la correction des signaux de l'étape 2 est confirmée en réel.
+- mlx-serve non mesuré : 107 Go nécessaires, 43,8 Go disponibles.

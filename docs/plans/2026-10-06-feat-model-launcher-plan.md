@@ -147,7 +147,9 @@ Livré : proxy hébergé par l'app (et `lml proxy`), noms stables et API distant
 
 **Terminé quand** Watslog fonctionne sans changement de configuration avec LiteLLM arrêté, et qu'une API distante est utilisable depuis un harness.
 
-### Étape 5 — Recettes et benchmark
+### Étape 5 — Recettes et benchmark — livrée le 9 octobre 2026, sauf la mesure de mlx-serve
+
+Livré : recettes à trois niveaux de provenance (valeurs du fichier, pièges constatés, recettes de l'utilisateur ou de Claude) appliquées au lancement de MTPLX (`--reasoning`, `--default-*`, `--context-window`) et de mlx-serve (`--temp`, `--top-p`, `--top-k`, `--ctx-size`) ; références omlx.ai pour oMLX ; « Demander à Claude » (Claude Code avec `--mcp-config` limité au serveur de l'app) ; `mtplx tune` dans Ghostty ; banc d'essai avec échauffement, conditions de mesure et pic mémoire ; outils MCP `get_model_context`, `save_recipe`, `list_recipes`, `list_benchmarks`, `run_benchmark`. Une recette « --reasoning off » a été enregistrée par Claude via le MCP à partir de la note LiteLLM, et vérifiée dans la commande du serveur. Critère de fin incomplet : deux moteurs mesurés (oMLX, MTPLX), tous deux pendant qu'une autre session utilisait oMLX ; mlx-serve n'a plus que Qwen3.8-Flash-Next (107 Go), qui ne tient pas à côté du modèle d'oMLX en cours d'utilisation.
 
 - Recettes de moteur et de modèle : flags, contexte, échantillonnage par défaut lu dans `generation_config.json`, pièges connus. Import des réglages déjà notés (`07-history.md`, commentaires LiteLLM).
 - Pour oMLX : afficher et appliquer les meilleurs réglages d'omlx.ai pour ce M5 Max.

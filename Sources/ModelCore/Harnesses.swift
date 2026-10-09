@@ -468,11 +468,12 @@ public enum HarnessOpener {
 
     /// `zsh -lic '<clean>; <harness>; exec zsh -l'`: the window stays usable after the harness exits.
     /// Ghostty passes its own environment to every window; when Ghostty was started from an agent session, that
-    /// includes its markers (`CLAUDE_CODE_CHILD_SESSION` turns transcripts off). They are cleared, except ours.
+    /// includes its markers (`CLAUDE_CODE_CHILD_SESSION` turns transcripts off) and possibly an `ANTHROPIC_BASE_URL`
+    /// that would send « Demander à Claude » elsewhere than the user's login. They are cleared, except ours.
     static func windowCommand(_ arguments: [String], keep: Set<String> = []) -> String {
         let shell = HarnessInstallations.userShell
         let kept = keep.sorted().joined(separator: " ")
-        let clean = #"for v in $(env | sed -En 's/^(CLAUDECODE|CLAUDE_[A-Z0-9_]+|CODEX_COMPANION_[A-Z0-9_]+|__CFBundleIdentifier)=.*/\1/p'); do case " "# + kept + #" " in *" $v "*) ;; *) unset "$v" ;; esac; done"#
+        let clean = #"for v in $(env | sed -En 's/^(CLAUDECODE|CLAUDE_[A-Z0-9_]+|ANTHROPIC_[A-Z0-9_]+|CODEX_COMPANION_[A-Z0-9_]+|__CFBundleIdentifier)=.*/\1/p'); do case " "# + kept + #" " in *" $v "*) ;; *) unset "$v" ;; esac; done"#
         let inner = clean + "; " + arguments.map(shellQuote).joined(separator: " ") + "; exec \(shellQuote(shell)) -l"
         return "\(shellQuote(shell)) -lic \(shellQuote(inner))"
     }

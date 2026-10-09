@@ -69,6 +69,8 @@ public enum ModelStarter {
                              snapshot: InventorySnapshot, force: Bool = false) async -> StartOutcome {
         let runtime = await Runtime.current()
         let omlx = runtime.engines.first { $0.kind == .omlx }
+        let recipe = RecipeDeriver.effective(model: model, engine: engine)
+        let context = context ?? recipe.context
         let estimate = MemoryPlanner.estimate(model: model, engine: engine, context: context, memory: runtime.memory,
                                               omlx: omlx?.omlx, running: runtime.running)
         func refuse(_ reason: String) -> StartOutcome { StartOutcome(estimate: estimate, result: nil, refusal: reason) }
@@ -95,7 +97,7 @@ public enum ModelStarter {
             guard let installation = runtime.engines.first(where: { $0.kind == engine })?.installation else { return refuse("\(engine.title) introuvable.") }
             do {
                 let plan = try LaunchPlan.make(model: model, engine: engine, port: port,
-                                               context: context ?? estimate.context, installation: installation)
+                                               context: context ?? estimate.context, installation: installation, recipe: recipe)
                 return StartOutcome(estimate: estimate, result: await ModelLauncher.start(plan, model: model), refusal: nil)
             } catch {
                 return refuse("\(error)")

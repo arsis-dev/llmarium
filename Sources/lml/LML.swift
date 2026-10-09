@@ -24,6 +24,11 @@ struct LML {
       lml proxy port <N>                   Change le port du point d'entrée
       lml provider list | set-key <id> | remove-key <id>   Fournisseurs distants et leurs clés
       lml sync              Inscrit tous les modèles joignables dans Pi et DeepSeek Harness via le point d'entrée
+      lml recipe [list] | show <modèle> | remove <modèle> | set <modèle> [--context N] [--reasoning on|off|auto]
+                 [--temperature x] [--top-p x] [--top-k n] [--note "…"]
+                            Recettes : réglages appliqués au lancement, sources et pièges connus
+      lml bench <modèle> | list
+                            Banc d'essai d'un modèle en mémoire, ou comparaison des mesures
       lml mcp               Serveur MCP sur stdio
     Option : --json pour une sortie JSON.
     L'arrêt et le déchargement se font dans l'app, après confirmation.
@@ -223,6 +228,74 @@ struct LML {
             } catch {
                 fail("\(error)")
             }
+        case "recipe":
+            let action = options.positional.dropFirst().first ?? "list"
+            if action == "list" {
+                for recipe in RecipeStore.shared.all() {
+                    print("\(recipe.engine.title) · \(recipe.model) · \(recipe.author.title) · \(recipe.updatedAt.formatted(date: .abbreviated, time: .omitted))")
+                }
+                if RecipeStore.shared.all().isEmpty { print("Aucune recette enregistrée : les recettes déduites sont calculées à la volée (lml recipe show <modèle>).") }
+                break
+            }
+            guard let query = options.positional.dropFirst(2).first else { fail("lml recipe show|set <modèle> [--engine …]") }
+            let snapshot = await Inventory.take()
+            guard case .success(let model) = ModelResolver.find(query, in: snapshot.models) else { fail("Modèle introuvable : \(query)") }
+            let engines = EngineCompatibility.engines(for: model, snapshot: snapshot)
+            guard let engine = options.value("engine").flatMap({ name in EngineKind.allCases.first { $0.rawValue.lowercased() == name.lowercased().replacingOccurrences(of: "-", with: "") } }) ?? engines.first ?? EngineKind.allCases.first(where: { $0.store == model.store }) else {
+                fail("Aucun moteur pour \(model.name)")
+            }
+            if action == "remove" {
+                do { try RecipeStore.shared.remove(engine: engine, model: model.name) } catch { fail("\(error)") }
+                print("Recette enregistrée retirée : \(model.name) sur \(engine.title) revient aux valeurs déduites des fichiers.")
+                break
+            }
+            var recipe = RecipeDeriver.effective(model: model, engine: engine)
+            if action == "set" {
+                if let context = options.value("context").flatMap(Int.init) { recipe.context = context }
+                if let reasoning = options.value("reasoning") { recipe.reasoning = reasoning == "auto" ? nil : reasoning }
+                if let value = options.value("temperature").flatMap(Double.init) { recipe.sampling.temperature = value }
+                if let value = options.value("top-p").flatMap(Double.init) { recipe.sampling.topP = value }
+                if let value = options.value("top-k").flatMap(Int.init) { recipe.sampling.topK = value }
+                if let note = options.value("note") { recipe.notes.append(note) }
+                recipe.author = .user
+                recipe.sources.append("Modifiée par l'utilisateur le \(Date().formatted(date: .abbreviated, time: .omitted))")
+                do { try RecipeStore.shared.save(recipe) } catch { fail("\(error)") }
+                print("Recette enregistrée.")
+            }
+            print(Report.recipe(recipe))
+            let preview = (try? LaunchPlan.make(model: model, engine: engine, port: 18_100, context: recipe.context,
+                                                 installation: snapshot.engine(engine)?.installation ?? EngineInstallation(kind: engine, version: nil, location: nil),
+                                                 recipe: recipe))
+            if let preview { print("Commande de lancement : \(([preview.executable] + preview.arguments).joined(separator: " "))") }
+            if engine == .omlx {
+                for reference in await CommunityBenchmarks.shared.best(model: LaunchPlan.servedName(model), machine: snapshot.machine) {
+                    print("omlx.ai : \(reference.decodeTokensPerSecond.map { String(format: "%.1f", $0) } ?? "?") tok/s en génération, \(reference.prefillTokensPerSecond.map { String(format: "%.0f", $0) } ?? "?") en lecture · \(reference.quantization ?? "") · \(reference.memoryGB.map { "\($0) Go" } ?? "") · \(reference.url)")
+                }
+            }
+        case "bench":
+            if options.positional.dropFirst().first == "list" || options.positional.count == 1 {
+                print(Report.benchmarks(BenchmarkStore.shared.all()))
+                break
+            }
+            let query = options.positional.dropFirst().first!
+            let snapshot = await Inventory.take()
+            // Straight to the engine: the proxy would add a hop to the numbers.
+            guard let target = HarnessTarget.targets(in: snapshot).first(where: { $0.modelID.localizedCaseInsensitiveContains(query) }),
+                  let running = snapshot.running.first(where: { $0.models.contains(target.modelID) }) else {
+                fail("« \(query) » n'est pas en mémoire : lancez-le d'abord (lml start).")
+            }
+            let local = snapshot.models.first { target.engine == .omlx ? OMLXIdentity.matches(target.modelID, $0) : LaunchPlan.servedName($0) == target.modelID }
+            let recipe = local.map { RecipeDeriver.effective(model: $0, engine: target.engine) }
+            let launched = LaunchRegistry.shared.servers().first { $0.pid == running.pid }
+            print("Banc d'essai de \(target.modelID) sur \(target.engine.title)…")
+            let result = await Benchmark.run(baseURL: target.baseURL, model: target.modelID, engine: target.engine,
+                                             engineVersion: snapshot.engine(target.engine)?.installation.version, machine: snapshot.machine,
+                                             pid: running.pid, context: target.contextWindow, recipeID: recipe?.id,
+                                             loadSeconds: launched?.loadSeconds,
+                                             otherClients: running.clients.map(\.title),
+                                             omlxURL: snapshot.engine(.omlx)?.instances.first?.url) { step in print("  \(step)…") }
+            do { try BenchmarkStore.shared.add(result) } catch { fail("\(error)") }
+            print(Report.benchmark(result))
         case "help", "-h":
             print(usage)
         default:
@@ -255,7 +328,7 @@ struct Options {
     var positional: [String] = []
     var values: [String: String] = [:]
     var flags: Set<String> = []
-    static let valued: Set<String> = ["engine", "context", "port", "model", "dir", "headless"]
+    static let valued: Set<String> = ["engine", "context", "port", "model", "dir", "headless", "reasoning", "temperature", "top-p", "top-k", "note"]
 
     init(_ arguments: [String]) {
         var index = 0

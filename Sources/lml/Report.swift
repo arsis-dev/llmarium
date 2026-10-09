@@ -98,6 +98,46 @@ enum Report {
         }
     }
 
+    static func recipe(_ recipe: Recipe) -> String {
+        var lines = ["\(recipe.model) sur \(recipe.engine.title) — \(recipe.author.title)"]
+        lines.append("  contexte       \(recipe.context.map { "\(Format.tokens($0)) tokens" } ?? "valeur du moteur")")
+        if recipe.engine == .mtplx { lines.append("  raisonnement   \(recipe.reasoning ?? "valeur du moteur (actif)")") }
+        lines.append("  échantillonnage \(recipe.sampling.summary)")
+        if !recipe.flags.isEmpty { lines.append("  options        \(recipe.flags.joined(separator: " "))") }
+        if !recipe.notes.isEmpty { lines.append("Notes :"); lines += recipe.notes.map { "  - \($0)" } }
+        if !recipe.sources.isEmpty { lines.append("Sources :"); lines += recipe.sources.map { "  - \($0)" } }
+        return lines.joined(separator: "\n")
+    }
+
+    static func benchmark(_ result: BenchmarkResult) -> String {
+        var lines = ["\(result.model) · \(result.engine.title) \(result.engineVersion ?? "") · \(result.date.formatted(date: .abbreviated, time: .shortened))"]
+        for run in result.runs {
+            let ttft = run.timeToFirstToken.map { String(format: "%.2f s", $0) } ?? "—"
+            let prefill = run.prefillTokensPerSecond.map { String(format: "%.0f", $0) } ?? "—"
+            let decode = run.decodeTokensPerSecond.map { String(format: "%.1f", $0) } ?? "—"
+            let tokens = "\(run.promptTokens.map(String.init) ?? "?") → \(run.completionTokens.map(String.init) ?? "?")\(run.tokensEstimated ? " (estimé)" : "")"
+            lines.append("  \(pad(run.title, 28)) \(run.succeeded ? "✓" : "✗")  1er token \(ttft), lecture \(prefill) tok/s, génération \(decode) tok/s, tokens \(tokens)\(run.reasoningObserved ? ", raisonnement présent" : "")\(run.note.map { " · \($0)" } ?? "")")
+        }
+        for condition in result.conditions { lines.append("  ⚠︎ \(condition) : mesure perturbée, à refaire au calme") }
+        lines.append("  pic mémoire du processus : \(result.peakMemoryBytes.map(Format.memory) ?? "—")\(result.engine == .omlx ? " (tous les modèles chargés dans oMLX)" : "")\(result.loadSeconds.map { " · chargement \($0) s" } ?? "")")
+        return lines.joined(separator: "\n")
+    }
+
+    static func benchmarks(_ results: [BenchmarkResult]) -> String {
+        guard !results.isEmpty else { return "Aucune mesure. Lancez lml bench <modèle> sur un modèle en mémoire." }
+        var lines = ["\(pad("modèle", 44)) \(pad("moteur", 10)) \(pad("génér.", 8)) \(pad("lecture", 8)) \(pad("1er tok", 8))  outil  long  pensée  mémoire"]
+        for result in results {
+            let decode = result.decodeTokensPerSecond.map { String(format: "%.1f", $0) } ?? "—"
+            let prefill = result.prefillTokensPerSecond.map { String(format: "%.0f", $0) } ?? "—"
+            let ttft = result.timeToFirstToken.map { String(format: "%.2f s", $0) } ?? "—"
+            let tool = result.toolCallSucceeded.map { $0 ? "✓" : "✗" } ?? "—"
+            let long = result.longContextSucceeded.map { $0 ? "✓" : "✗" } ?? "—"
+            lines.append("\(pad(String(result.model.prefix(44)), 44))\(result.disturbed ? "⚠︎" : " ")\(pad(result.engine.title, 10)) \(pad(decode, 8)) \(pad(prefill, 8)) \(pad(ttft, 8))    \(tool)     \(long)     \(result.reasoningObserved ? "oui" : "non")   \(result.peakMemoryBytes.map(Format.memory) ?? "—")")
+        }
+        lines.append("génér. et lecture en tokens/s ; « pensée » : raisonnement produit malgré la demande de le couper ; ⚠︎ : mesure perturbée par d'autres clients.")
+        return lines.joined(separator: "\n")
+    }
+
     static func memorySummary(_ stats: MemoryStats, omlx: OMLXState?) -> String {
         "Mémoire : \(Format.memory(stats.usedBytes)) utilisés sur \(Format.memory(stats.totalBytes)), pression \(stats.pressure.title.lowercased()), marge macOS \(stats.freePercent.map { "\($0) %" } ?? "—") (mémoire inactive comprise)"
     }

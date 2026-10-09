@@ -77,6 +77,73 @@ struct MCPServer {
                 return Failure(error: "\(error)")
             }
         },
+        Tool(name: "get_model_context",
+             description: "Tout ce qu'il faut pour proposer la meilleure configuration d'un modèle sur un moteur de ce Mac : machine, moteur et version, architecture et quantification, valeurs du generation_config.json, recette en vigueur et ses sources, pièges constatés, mesures de mémoire, derniers bancs d'essai, et pour oMLX les meilleurs résultats publiés sur omlx.ai pour cette puce. Indique aussi quels champs de recette s'appliquent à ce moteur. Lecture seule.",
+             properties: modelProperties, required: ["model"]) { arguments in
+            await withModel(arguments) { model, engine, _, snapshot in
+                await ModelContext.build(model: model, engine: engine, snapshot: snapshot)
+            }
+        },
+        Tool(name: "save_recipe",
+             description: "Enregistre la recette d'un modèle sur un moteur (signée « Claude »). Appliquée quand l'app lance MTPLX ou mlx-serve ; indicative pour oMLX. Chaque valeur doit venir d'une source citée dans « sources » (page, fiche du modèle, mesure). Ne lance rien.",
+             properties: modelProperties.merging([
+                "reasoning": ["type": "string", "enum": ["on", "off", "auto"], "description": "MTPLX seulement."],
+                "temperature": ["type": "number"], "top_p": ["type": "number"], "top_k": ["type": "integer"],
+                "flags": ["type": "array", "items": ["type": "string"], "description": "Options supplémentaires du moteur, une par élément."],
+                "notes": ["type": "array", "items": ["type": "string"]],
+                "sources": ["type": "array", "items": ["type": "string"], "description": "Obligatoire : d'où vient chaque valeur, avec date."]
+             ]) { current, _ in current }, required: ["model", "sources"], readOnly: false) { arguments in
+            await withModel(arguments) { model, engine, context, _ in
+                guard let sources = arguments["sources"] as? [String], !sources.isEmpty else { return Failure(error: "« sources » est obligatoire.") }
+                var recipe = RecipeDeriver.effective(model: model, engine: engine)
+                if let context { recipe.context = context }
+                if let reasoning = arguments["reasoning"] as? String { recipe.reasoning = reasoning == "auto" ? nil : reasoning }
+                if let value = (arguments["temperature"] as? NSNumber)?.doubleValue { recipe.sampling.temperature = value }
+                if let value = (arguments["top_p"] as? NSNumber)?.doubleValue { recipe.sampling.topP = value }
+                if let value = (arguments["top_k"] as? NSNumber)?.intValue { recipe.sampling.topK = value }
+                if let flags = arguments["flags"] as? [String] { recipe.flags = flags }
+                for note in arguments["notes"] as? [String] ?? [] where !recipe.notes.contains(note) { recipe.notes.append(note) }
+                let stamp = Date().formatted(date: .abbreviated, time: .omitted)
+                recipe.sources += sources.map { "\($0) (Claude, \(stamp))" }
+                recipe.author = .claude
+                do { try RecipeStore.shared.save(recipe) } catch { return Failure(error: "\(error)") }
+                return recipe
+            }
+        },
+        Tool(name: "list_recipes", description: "Recettes enregistrées (écrites par l'utilisateur ou par Claude). Lecture seule.") { _ in
+            RecipeStore.shared.all()
+        },
+        Tool(name: "list_benchmarks",
+             description: "Résultats des bancs d'essai : délai avant le premier token, vitesses de lecture et de génération, appel d'outil, contexte long, pic mémoire, conditions de mesure. Lecture seule.") { _ in
+            BenchmarkStore.shared.all()
+        },
+        Tool(name: "run_benchmark",
+             description: "Mesure un modèle déjà en mémoire (consigne courte, contexte d'environ 13K tokens, appel d'outil) directement sur son moteur. Prend une à trois minutes : répond après 25 s au plus, le résultat arrive ensuite dans list_benchmarks.",
+             properties: ["model": ["type": "string", "description": "Partie du nom d'un modèle en cours."]], required: ["model"], readOnly: false) { arguments in
+            let query = arguments["model"] as? String ?? ""
+            let snapshot = await Inventory.take()
+            guard let target = HarnessTarget.targets(in: snapshot).first(where: { $0.modelID.localizedCaseInsensitiveContains(query) }),
+                  let running = snapshot.running.first(where: { $0.models.contains(target.modelID) }) else {
+                return Failure(error: "« \(query) » n'est pas en mémoire : lancez-le d'abord avec start_model.")
+            }
+            let box = BenchmarkBox()
+            Task {
+                let local = snapshot.models.first { target.engine == .omlx ? OMLXIdentity.matches(target.modelID, $0) : LaunchPlan.servedName($0) == target.modelID }
+                let result = await Benchmark.run(baseURL: target.baseURL, model: target.modelID, engine: target.engine,
+                                                 engineVersion: snapshot.engine(target.engine)?.installation.version, machine: snapshot.machine,
+                                                 pid: running.pid, context: target.contextWindow,
+                                                 recipeID: local.map { RecipeDeriver.effective(model: $0, engine: target.engine).id },
+                                                 loadSeconds: LaunchRegistry.shared.servers().first { $0.pid == running.pid }?.loadSeconds,
+                                                 otherClients: running.clients.map(\.title), omlxURL: snapshot.engine(.omlx)?.instances.first?.url)
+                try? BenchmarkStore.shared.add(result)
+                box.set(result)
+            }
+            for _ in 0..<25 {
+                if let result = box.get() { return result }
+                try? await Task.sleep(for: .seconds(1))
+            }
+            return Pending(message: "Mesure de \(target.modelID) en cours ; le résultat apparaîtra dans list_benchmarks.")
+        },
         Tool(name: "get_disk_report",
              description: "Occupation des dossiers de modèles, architectures présentes en plusieurs exemplaires, liens cassés et entrées vides du cache Hugging Face. Ne supprime rien.") { _ in
             await Inventory.take().disk
@@ -109,6 +176,13 @@ struct MCPServer {
         var started = false
         var loading = true
         var message: String
+    }
+
+    final class BenchmarkBox: @unchecked Sendable {
+        private let lock = NSLock()
+        private var result: BenchmarkResult?
+        func set(_ value: BenchmarkResult) { lock.withLock { result = value } }
+        func get() -> BenchmarkResult? { lock.withLock { result } }
     }
 
     final class OutcomeBox: @unchecked Sendable {

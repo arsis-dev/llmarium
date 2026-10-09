@@ -27,6 +27,12 @@ public struct EngineInstallation: Codable, Hashable, Sendable {
 
     public var isInstalled: Bool { location != nil }
 
+    public init(kind: EngineKind, version: String?, location: String?) {
+        self.kind = kind
+        self.version = version
+        self.location = location
+    }
+
     public static func detect(_ kind: EngineKind, home: URL = FileManager.default.homeDirectoryForCurrentUser) -> EngineInstallation {
         let applications = ["/Applications", home.appending(path: "Applications").path]
         func app(_ name: String) -> (String, String?)? {
