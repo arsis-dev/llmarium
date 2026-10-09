@@ -53,6 +53,7 @@ struct MenuPanel: View {
                         }
                     }
                 }
+                ProxyLine()
                 Divider()
                 MemoryBar(stats: snapshot.memory.stats, ceiling: snapshot.engine(.omlx)?.omlx?.ceilingBytes)
                 Divider()
@@ -92,5 +93,32 @@ struct MenuPanel: View {
         .padding(16)
         .frame(width: 360)
         .task { await model.refresh() }
+    }
+}
+
+/// The proxy's state in the menu bar panel.
+struct ProxyLine: View {
+    @ObservedObject private var proxy = ProxyController.shared
+    @EnvironmentObject private var model: InventoryModel
+
+    var body: some View {
+        Button {
+            AppWindows.showMain(model, section: .proxy)
+        } label: {
+            HStack(alignment: .firstTextBaseline) {
+                Text("Point d'entrée").frame(width: 82, alignment: .leading)
+                switch proxy.state {
+                case .running(let port):
+                    StatePill(text: "Actif", color: .green)
+                    Spacer()
+                    Text(":\(port)").font(.callout.monospaced()).foregroundStyle(.secondary)
+                case .failed: StatePill(text: "Erreur", color: .red); Spacer()
+                case .starting: StatePill(text: "Démarrage…", color: .orange); Spacer()
+                case .off: StatePill(text: "Arrêté", color: .secondary); Spacer()
+                }
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
     }
 }

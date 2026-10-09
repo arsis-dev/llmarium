@@ -3,7 +3,7 @@ import ModelCore
 import SwiftUI
 
 enum Section: String, CaseIterable, Identifiable {
-    case running, engines, models, disk, memory
+    case running, engines, models, proxy, disk, memory
 
     var id: String { rawValue }
 
@@ -12,6 +12,7 @@ enum Section: String, CaseIterable, Identifiable {
         case .running: "En cours"
         case .engines: "Moteurs"
         case .models: "Modèles"
+        case .proxy: "Point d'entrée"
         case .disk: "Disque"
         case .memory: "Mémoire"
         }
@@ -22,6 +23,7 @@ enum Section: String, CaseIterable, Identifiable {
         case .running: "bolt.circle"
         case .engines: "server.rack"
         case .models: "shippingbox"
+        case .proxy: "arrow.triangle.branch"
         case .disk: "internaldrive"
         case .memory: "memorychip"
         }

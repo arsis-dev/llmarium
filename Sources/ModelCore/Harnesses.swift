@@ -60,10 +60,15 @@ public struct HarnessTarget: Codable, Hashable, Sendable {
     public var openAIBaseURL: String { baseURL + "/v1" }
 
     /// Targets for the models an engine holds now. oMLX may hold several; MTPLX and mlx-serve hold one.
-    public static func targets(in snapshot: InventorySnapshot) -> [HarnessTarget] {
-        snapshot.running.compactMap { running -> [HarnessTarget]? in
-            guard let engine = running.role.engine, let url = running.baseURL else { return nil }
-            return running.models.map { id in
+    /// With the proxy running, harnesses go through it: their settings then survive a model moving to another port.
+    public static func targets(in snapshot: InventorySnapshot, via proxy: String? = nil) -> [HarnessTarget] {
+        snapshot.running.flatMap { targets(for: $0, in: snapshot, via: proxy) }
+    }
+
+    public static func targets(for running: RunningModel, in snapshot: InventorySnapshot, via proxy: String? = nil) -> [HarnessTarget] {
+        guard let engine = running.role.engine, let engineURL = running.baseURL else { return [] }
+        let url = proxy ?? engineURL
+        return running.models.map { id in
                 let omlxState = engine == .omlx ? snapshot.engine(.omlx)?.omlx?.models.first { $0.id == id } : nil
                 let local = snapshot.models.first { model in
                     engine == .omlx ? OMLXIdentity.matches(id, model) : LaunchPlan.servedName(model) == id && model.store == engine.store
@@ -72,9 +77,7 @@ public struct HarnessTarget: Codable, Hashable, Sendable {
                 return HarnessTarget(engine: engine, baseURL: url, modelID: id,
                                      contextWindow: omlxState?.maxContext ?? launched?.context ?? local?.spec?.maxContext,
                                      modelType: local?.spec?.modelType)
-            }
         }
-        .flatMap { $0 }
     }
 }
 
@@ -227,8 +230,12 @@ public enum HarnessPlanner {
         return String(decoding: data, as: UTF8.self)
     }
 
-    /// Pi's providers with ours replaced or added. Other providers and top-level keys are kept as they are.
     static func piModels(existing: Data?, target: HarnessTarget) throws -> Data {
+        try piModels(existing: existing, baseURL: target.baseURL, models: [HarnessModel(target)])
+    }
+
+    /// Pi's providers with ours replaced or added. Other providers and top-level keys are kept as they are.
+    static func piModels(existing: Data?, baseURL: String, models: [HarnessModel]) throws -> Data {
         var root: [String: Any] = [:]
         if let existing, !existing.isEmpty {
             guard let parsed = (try? JSONSerialization.jsonObject(with: existing)) as? [String: Any] else {
@@ -239,31 +246,41 @@ public enum HarnessPlanner {
         var providers = root["providers"] as? [String: Any] ?? [:]
         var compat: [String: Any] = ["supportsDeveloperRole": false, "supportsReasoningEffort": false,
                                      "maxTokensField": "max_tokens", "requiresToolResultName": true]
-        if target.modelType?.hasPrefix("qwen") == true { compat["thinkingFormat"] = "qwen" }
-        var model: [String: Any] = ["id": target.modelID, "name": "\(target.modelID) (local)", "input": ["text"],
-                                    "reasoning": true, "cost": ["input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0]]
-        if let context = target.contextWindow {
-            model["contextWindow"] = context
-            model["maxTokens"] = min(context / 4, 32_768)
+        // One compat block per provider: the Qwen thinking format only when every model is a Qwen.
+        if !models.isEmpty, models.allSatisfy({ $0.modelType?.hasPrefix("qwen") == true }) { compat["thinkingFormat"] = "qwen" }
+        let entries = models.map { item -> [String: Any] in
+            var model: [String: Any] = ["id": item.id, "name": item.name, "input": ["text"],
+                                        "reasoning": true, "cost": ["input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0]]
+            if let context = item.contextWindow {
+                model["contextWindow"] = context
+                model["maxTokens"] = min(context / 4, 32_768)
+            }
+            return model
         }
-        providers[providerID] = ["api": "openai-completions", "baseUrl": target.openAIBaseURL, "apiKey": placeholderKey,
-                                 "compat": compat, "models": [model]]
+        providers[providerID] = ["api": "openai-completions", "baseUrl": baseURL + "/v1", "apiKey": placeholderKey,
+                                 "compat": compat, "models": entries]
         root["providers"] = providers
         return try JSONSerialization.data(withJSONObject: root, options: [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes])
     }
 
     static let dshMarker = "# Fournisseur géré par Modèles locaux : réécrit à chaque ouverture."
 
-    /// Our provider inside the `llm-pi-ai` entry of a hand-edited YAML patch layer, changing no other line.
     static func dshPatch(existing: String?, target: HarnessTarget) throws -> String {
+        try dshPatch(existing: existing, baseURL: target.baseURL, models: [HarnessModel(target)])
+    }
+
+    /// Our provider inside the `llm-pi-ai` entry of a hand-edited YAML patch layer, changing no other line.
+    static func dshPatch(existing: String?, baseURL: String, models: [HarnessModel]) throws -> String {
         func block(indent: Int) -> [String] {
             let pad = String(repeating: " ", count: indent)
             var lines = ["\(pad)\(dshMarker)", "\(pad)\(providerID):", "\(pad)  displayName: Modèles locaux",
-                         "\(pad)  api: openai-completions", "\(pad)  baseURL: \(yamlString(target.openAIBaseURL))",
-                         "\(pad)  apiKeyEnv: \(apiKeyVariable)", "\(pad)  models:",
-                         "\(pad)    - id: \(yamlString(target.modelID))", "\(pad)      name: \(yamlString("\(target.modelID) (local)"))"]
-            if let context = target.contextWindow { lines.append("\(pad)      contextWindow: \(context)") }
-            lines += ["\(pad)      input:", "\(pad)        - text"]
+                         "\(pad)  api: openai-completions", "\(pad)  baseURL: \(yamlString(baseURL + "/v1"))",
+                         "\(pad)  apiKeyEnv: \(apiKeyVariable)", "\(pad)  models:"]
+            for model in models {
+                lines += ["\(pad)    - id: \(yamlString(model.id))", "\(pad)      name: \(yamlString(model.name))"]
+                if let context = model.contextWindow { lines.append("\(pad)      contextWindow: \(context)") }
+                lines += ["\(pad)      input:", "\(pad)        - text"]
+            }
             return lines
         }
         let header = ["# Your patch layer for this dsh profile, applied after every bundle layer.", ""]
@@ -310,6 +327,74 @@ public enum HarnessPlanner {
             try? FileManager.default.copyItem(at: url, to: copy)
         }
         try data.write(to: url, options: .atomic)
+    }
+}
+
+/// One model as a harness lists it.
+public struct HarnessModel: Hashable, Sendable {
+    public var id: String
+    public var contextWindow: Int?
+    public var modelType: String?
+    /// Where it runs, for the label (« oMLX », « deepseek »…).
+    public var origin: String
+
+    public init(id: String, contextWindow: Int?, modelType: String?, origin: String) {
+        self.id = id
+        self.contextWindow = contextWindow
+        self.modelType = modelType
+        self.origin = origin
+    }
+
+    init(_ target: HarnessTarget) {
+        self.init(id: target.modelID, contextWindow: target.contextWindow, modelType: target.modelType, origin: "local")
+    }
+
+    var name: String { origin == "local" ? "\(id) (local)" : "\(id) (\(origin))" }
+}
+
+/// « Synchroniser » : every model the proxy can reach, written once into Pi and DeepSeek Harness with the proxy's
+/// stable address. Choosing a model then happens in the harness itself.
+public enum HarnessSync {
+    public static func catalog(snapshot: InventorySnapshot, table: RouteTable) -> [HarnessModel] {
+        var models: [HarnessModel] = []
+        var seen = Set<String>()
+        func add(_ model: HarnessModel) { if seen.insert(model.id).inserted { models.append(model) } }
+        // Harnesses chat: embedding and other non-language models stay out of their pickers.
+        func isLanguageModel(_ id: String) -> Bool {
+            snapshot.models.first { OMLXIdentity.matches(id, $0) || LaunchPlan.servedName($0) == id }.map { $0.kind != .other } ?? true
+        }
+        let targets = HarnessTarget.targets(in: snapshot).filter { isLanguageModel($0.modelID) }
+        for target in targets {
+            add(HarnessModel(id: target.modelID, contextWindow: target.contextWindow, modelType: target.modelType, origin: target.engine.title))
+        }
+        for alias in table.aliases.values.sorted(by: { $0.alias < $1.alias }) {
+            guard case .upstream(let upstream) = table.resolve(model: alias.alias, path: "/v1/chat/completions") else { continue }
+            if let provider = upstream.providerID, !ProviderKeys.hasKey(for: provider) { continue }
+            if upstream.providerID == nil, !isLanguageModel(alias.model) { continue }
+            let target = targets.first { $0.modelID == alias.model }
+            add(HarnessModel(id: alias.alias, contextWindow: target?.contextWindow, modelType: target?.modelType, origin: upstream.label))
+        }
+        for provider in table.providers where ProviderKeys.hasKey(for: provider.id) {
+            provider.models.forEach { add(HarnessModel(id: $0, contextWindow: nil, modelType: nil, origin: provider.id)) }
+        }
+        return models
+    }
+
+    /// Writes our provider into Pi and DeepSeek Harness (when installed), each with a dated backup.
+    public static func sync(proxy: String, models: [HarnessModel], installed: Set<HarnessKind>, paths: HarnessPaths = .standard) throws -> [String] {
+        var written: [String] = []
+        if installed.contains(.pi) {
+            let existing = try? Data(contentsOf: paths.piModels)
+            try HarnessPlanner.write(HarnessPlanner.piModels(existing: existing, baseURL: proxy, models: models), to: paths.piModels, backup: existing != nil)
+            written.append(paths.piModels.path)
+        }
+        if installed.contains(.deepseekHarness) {
+            let existing = try? String(contentsOf: paths.dshPatch, encoding: .utf8)
+            let updated = try HarnessPlanner.dshPatch(existing: existing, baseURL: proxy, models: models)
+            try HarnessPlanner.write(Data(updated.utf8), to: paths.dshPatch, backup: existing != nil)
+            written.append(paths.dshPatch.path)
+        }
+        return written
     }
 }
 

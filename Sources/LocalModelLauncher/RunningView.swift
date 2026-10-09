@@ -96,7 +96,7 @@ struct RunningView: View {
                     }
                     ForEach(snapshot.running) { running in
                         RunningCard(running: running, busy: model.busyPID == running.pid,
-                                    targets: HarnessTarget.targets(in: snapshot).filter { $0.baseURL == running.baseURL },
+                                    targets: HarnessTarget.targets(for: running, in: snapshot, via: ProxyController.shared.url),
                                     installed: model.installedHarnesses,
                                     openHarness: { target, kind in harnessRequest = HarnessRequest(target: target, kind: kind) }) { pending = $0 }
                     }

@@ -26,6 +26,7 @@ struct LocalModelLauncherApp: App {
 final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         Task { await InventoryModel.shared.refresh() }
+        ProxyController.shared.startIfEnabled()
         if !UserDefaults.standard.bool(forKey: "hasShownMainWindow") {
             AppWindows.showMain(InventoryModel.shared)
             UserDefaults.standard.set(true, forKey: "hasShownMainWindow")

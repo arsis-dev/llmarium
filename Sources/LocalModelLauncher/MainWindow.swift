@@ -18,6 +18,7 @@ struct MainWindowView: View {
                     case .running: RunningView(snapshot: snapshot)
                     case .engines: EnginesView(snapshot: snapshot)
                     case .models: ModelsView(snapshot: snapshot)
+                    case .proxy: ProxyView(snapshot: snapshot)
                     case .disk: DiskView(snapshot: snapshot)
                     case .memory: MemoryView(snapshot: snapshot)
                     }

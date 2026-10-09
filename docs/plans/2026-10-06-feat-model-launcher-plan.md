@@ -136,7 +136,9 @@ Claude Code, Codex, Pi et OpenCode 2 ont chacun terminé une session avec appel 
 
 **Terminé quand** chacun des cinq harness termine une session avec appel d'outil sur un modèle local, et que la comparaison des fichiers montre les configurations utilisateur intactes hors entrée gérée.
 
-### Étape 4 — Proxy, API distantes et sortie de LiteLLM
+### Étape 4 — Proxy, API distantes et sortie de LiteLLM — livrée le 9 octobre 2026, bascule à faire par l'utilisateur
+
+Livré : proxy hébergé par l'app (et `lml proxy`), noms stables et API distantes (`proxy.json`, import LiteLLM), clés dans le trousseau, « Synchroniser » pour Pi et DeepSeek Harness, « Ouvrir dans… » par le proxy. Décision KTD7 : **aucune dépendance**. Le proxy est un relais TCP sur Network.framework : il lit l'en-tête et le corps (`Content-Length`, `Expect: 100-continue`), réécrit l'hôte, la longueur, l'autorisation et le champ `model`, puis recopie la réponse octet pour octet jusqu'à la fermeture par l'amont ; le streaming passe donc sans traitement. Écoute sur 127.0.0.1 seulement : Network.framework refuse un second socket IPv6 sur le même port, et LiteLLM n'écoutait lui aussi que sur 127.0.0.1. Un nom importé d'une entrée locale ne part jamais vers une API distante (bug trouvé pendant les essais : `ds4-flash` aurait atteint l'API DeepSeek, dont un modèle porte le même identifiant). La bascule (arrêt de LiteLLM, port 4000) est décrite dans [bascule-litellm.md](../bascule-litellm.md) : elle demande les clés de l'utilisateur et arrête un service dont dépend Watslog.
 
 - Proxy KTD7. Fournisseurs distants avec leurs clés dans le trousseau et leurs protocoles déclarés.
 - Action « Synchroniser » : tout le catalogue apparaît, via le proxy, dans les sélecteurs de Pi, OpenCode 2 et DeepSeek Harness.

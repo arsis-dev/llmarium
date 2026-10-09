@@ -77,3 +77,20 @@ Modèle : `Qwen3.8-27B-Huihui-Abliterated-oQ6e-MTP-MLX` sur oMLX 0.7.0 (déjà c
 - Fenêtre Ghostty : Claude Code ouvert pour de bon dans le dossier choisi, sur le bon modèle.
 - Ghostty avait été démarré depuis une session Claude Code et passait ses variables `CLAUDE_*` à toutes ses fenêtres (`CLAUDE_CODE_CHILD_SESSION` coupait l'historique de Claude Code). Les fenêtres ouvertes par l'app effacent ces marqueurs, sauf les variables qu'elle définit.
 - Le fournisseur DeepSeek Harness déclare `apiKeyEnv: LOCAL_LAUNCHER_API_KEY`, comme votre fournisseur `dwarfstar` ; l'app ouverte par `open` ne reçoit pas cette variable. À vérifier lors de la première session.
+
+## Point d'entrée — 9 octobre 2026
+
+Port de test 18099, modèle `Qwen3.8-27B-Huihui-Abliterated-oQ6e-MTP-MLX` sur oMLX.
+
+| Essai | Résultat |
+|---|---|
+| `GET /v1/models` avec `Authorization: Bearer litellm:local` via `localhost`, comme Watslog | ✅ 200 (client replié sur 127.0.0.1) |
+| Chat en streaming | ✅ 26 morceaux, premier à 1,55 s, puis toutes les ~0,22 s jusqu'à 8,7 s : rien n'est retenu |
+| Claude Code `-p` avec `ANTHROPIC_BASE_URL` sur le proxy, appel d'outil | ✅ 33 s, deux requêtes `/v1/messages` |
+| Alias `qwen3.8-27b-abliterated` (chat) et `granite-embedding` (`/v1/embeddings`) | ✅ réécrits vers l'identifiant d'oMLX |
+| Corps de 5 Ko avec `Expect: 100-continue` (curl) | ✅ réponse en 1 ms, sans l'attente d'une seconde |
+| `deepseek-v4-pro` sans clé | ✅ 503 qui nomme la commande pour ajouter la clé |
+| `ds4-flash` (ds4 arrêté) | ✅ 404 « local seulement », jamais envoyé à l'API DeepSeek |
+| Faux moteur en test, trois événements à 300 ms | ✅ reçus étalés, `model` réécrit, `Connection: close` |
+
+Non testé : une API distante réelle (aucune clé saisie), Watslog branché sur le proxy (bascule non faite).
