@@ -1,0 +1,209 @@
+import Foundation
+import ModelCore
+
+/// Minimal MCP server over stdio: one JSON-RPC message per line. Stdout carries protocol messages only.
+struct MCPServer {
+    static let protocolVersion = "2025-06-18"
+
+    struct Tool {
+        var name: String
+        var description: String
+        var properties: [String: Any] = [:]
+        var required: [String] = []
+        var readOnly = true
+        var run: ([String: Any]) async -> Encodable
+    }
+
+    let tools: [Tool] = [
+        Tool(name: "get_status",
+             description: "Résumé en lecture seule : moteurs locaux (oMLX, MTPLX, mlx-serve), état, port, modèles chargés, mémoire et disque.") { _ in
+            await Inventory.take()
+        },
+        Tool(name: "list_models",
+             description: "Modèles présents sur le disque, avec emplacement, taille, format, architecture, quantification et contexte maximal.",
+             properties: ["all": ["type": "boolean", "description": "Inclure embeddings, rerankers et autres modèles. Par défaut : modèles de langage seulement."]]) { arguments in
+            let all = arguments["all"] as? Bool ?? false
+            return await Inventory.take().models.filter { all || $0.kind == .languageModel || $0.isBrokenLink }
+        },
+        Tool(name: "list_running_models",
+             description: "Modèles en mémoire maintenant (serveurs des moteurs et processus de modèle hors moteur) : mémoire, ports, depuis quand, qui les a lancés (app, session d'agent, projet) et clients connectés. Lecture seule : l'arrêt se fait dans l'app, après confirmation.") { _ in
+            await Runtime.current().running
+        },
+        Tool(name: "estimate_memory",
+             description: "Mémoire nécessaire pour charger un modèle sur un moteur (poids mesurés ou taille sur disque, cache de contexte), mémoire disponible maintenant, verdict et quoi libérer. Lecture seule.",
+             properties: modelProperties, required: ["model"]) { arguments in
+            await withModel(arguments) { model, engine, context, snapshot in
+                MemoryPlanner.estimate(model: model, engine: engine, context: context, memory: snapshot.memory,
+                                       omlx: snapshot.engine(.omlx)?.omlx, running: snapshot.running)
+            }
+        },
+        Tool(name: "start_model",
+             description: "Charge un modèle : dans oMLX (via son API), ou en lançant un serveur MTPLX ou mlx-serve sur 127.0.0.1 (port 18100 à 18199). Ré-estime la mémoire au moment du lancement et refuse si le modèle ne tient pas. Attend qu'il réponde et renvoie l'adresse. L'arrêt ne se fait pas par MCP : il se fait dans l'app, après confirmation.",
+             properties: modelProperties, required: ["model"], readOnly: false) { arguments in
+            await withModel(arguments) { model, engine, context, snapshot in
+                // A large model takes minutes to load; MCP clients give up much sooner. Answer within 25 s,
+                // and let the load go on: the server is recorded and shows in list_running_models once ready.
+                let box = OutcomeBox()
+                Task { box.set(await ModelStarter.start(model, engine: engine, context: context, snapshot: snapshot)) }
+                for _ in 0..<25 {
+                    if let outcome = box.get() { return StartAnswer(outcome) }
+                    try? await Task.sleep(for: .seconds(1))
+                }
+                return Pending(message: "\(model.name) se charge toujours sur \(engine.title) après 25 s. Il apparaîtra dans list_running_models une fois prêt.")
+            }
+        },
+        Tool(name: "get_disk_report",
+             description: "Occupation des dossiers de modèles, architectures présentes en plusieurs exemplaires, liens cassés et entrées vides du cache Hugging Face. Ne supprime rien.") { _ in
+            await Inventory.take().disk
+        },
+        Tool(name: "get_memory_report",
+             description: "Mémoire du Mac, pression et plus gros consommateurs (apps, moteurs, processus de modèles hors moteur), plus le plafond mémoire d'oMLX.") { _ in
+            let processes = ProcessScanner.all()
+            let engines = await EngineDetector.detect(processes: processes)
+            return MemoryAnswer(memory: .current(processes: processes), omlx: engines.first { $0.kind == .omlx }?.omlx)
+        }
+    ]
+
+    static let modelProperties: [String: Any] = [
+        "model": ["type": "string", "description": "Nom du modèle (owner/name, nom du dossier ou partie unique du nom)."],
+        "engine": ["type": "string", "enum": ["omlx", "mtplx", "mlx-serve"], "description": "Moteur ; par défaut le premier compatible."],
+        "context": ["type": "integer", "description": "Contexte en tokens ; par défaut le maximum du modèle, plafonné à 64K."]
+    ]
+
+    struct Failure: Encodable { var error: String }
+
+    struct Pending: Encodable {
+        var started = false
+        var loading = true
+        var message: String
+    }
+
+    final class OutcomeBox: @unchecked Sendable {
+        private let lock = NSLock()
+        private var outcome: StartOutcome?
+        func set(_ value: StartOutcome) { lock.lock(); outcome = value; lock.unlock() }
+        func get() -> StartOutcome? { lock.lock(); defer { lock.unlock() }; return outcome }
+    }
+
+    /// Resolves `model` and `engine` from the call, then runs `body` with a fresh inventory.
+    static func withModel(_ arguments: [String: Any],
+                          _ body: (LocalModel, EngineKind, Int?, InventorySnapshot) async -> Encodable) async -> Encodable {
+        let snapshot = await Inventory.take()
+        guard let query = arguments["model"] as? String else { return Failure(error: "Paramètre « model » manquant.") }
+        let model: LocalModel
+        switch ModelResolver.find(query, in: snapshot.models) {
+        case .success(let found): model = found
+        case .failure(let error): return Failure(error: error.description)
+        }
+        let engines = EngineCompatibility.engines(for: model, snapshot: snapshot)
+        let requested = (arguments["engine"] as? String).flatMap { name in
+            EngineKind.allCases.first { $0.rawValue.lowercased() == name.lowercased().replacingOccurrences(of: "-", with: "") }
+        }
+        guard let engine = requested ?? engines.first else {
+            return Failure(error: "Aucun moteur ne peut servir \(model.name).")
+        }
+        return await body(model, engine, (arguments["context"] as? NSNumber)?.intValue, snapshot)
+    }
+
+    struct StartAnswer: Encodable {
+        var started: Bool
+        var message: String
+        var url: String?
+        var servedModels: [String]?
+        var pid: Int32?
+        var logPath: String?
+        var estimate: MemoryEstimate
+
+        init(_ outcome: StartOutcome) {
+            estimate = outcome.estimate
+            started = false
+            switch outcome.result {
+            case .ready(let server, let served, let seconds):
+                started = true
+                message = "Prêt en \(seconds) s."
+                url = "http://127.0.0.1:\(server.port)/v1"
+                servedModels = served
+                pid = server.pid
+                logPath = server.logPath
+            case .loadedInOMLX(let id, let seconds):
+                started = true
+                message = "\(id) chargé dans oMLX en \(seconds) s."
+                servedModels = [id]
+            case .failed(let reason, let log):
+                message = reason + (log.map { "\n\($0)" } ?? "")
+            case nil:
+                message = outcome.refusal ?? "Rien n'a été lancé."
+            }
+        }
+    }
+
+    struct MemoryAnswer: Encodable {
+        var memory: MemoryReport
+        var omlx: OMLXState?
+    }
+
+    func run() async {
+        while let line = readLine(strippingNewline: true) {
+            guard !line.isEmpty,
+                  let message = (try? JSONSerialization.jsonObject(with: Data(line.utf8))) as? [String: Any] else {
+                if !line.isEmpty { send(error: -32700, message: "Parse error", id: NSNull()) }
+                continue
+            }
+            await handle(message)
+        }
+    }
+
+    func handle(_ message: [String: Any]) async {
+        let method = message["method"] as? String ?? ""
+        // Notifications carry no id and get no answer.
+        guard let id = message["id"] else { return }
+        let params = message["params"] as? [String: Any] ?? [:]
+        switch method {
+        case "initialize":
+            let requested = params["protocolVersion"] as? String
+            send(result: [
+                "protocolVersion": requested ?? Self.protocolVersion,
+                "capabilities": ["tools": ["listChanged": false]],
+                "serverInfo": ["name": "local-model-launcher", "version": "0.1.0"],
+                "instructions": "Moteurs et modèles locaux de ce Mac. Tous les outils sont en lecture seule sauf start_model, qui charge un modèle après un contrôle de mémoire. Aucun outil n'arrête, ne décharge ni ne supprime : cela se fait dans l'app, après confirmation."
+            ], id: id)
+        case "ping":
+            send(result: [:], id: id)
+        case "tools/list":
+            send(result: ["tools": tools.map { tool in
+                ["name": tool.name, "description": tool.description,
+                 "inputSchema": ["type": "object", "properties": tool.properties, "required": tool.required, "additionalProperties": false],
+                 "annotations": ["readOnlyHint": tool.readOnly, "destructiveHint": false, "openWorldHint": false]]
+            }], id: id)
+        case "tools/call":
+            guard let name = params["name"] as? String, let tool = tools.first(where: { $0.name == name }) else {
+                send(error: -32602, message: "Unknown tool", id: id)
+                return
+            }
+            let value = await tool.run(params["arguments"] as? [String: Any] ?? [:])
+            let text = (try? JSONCoding.encoder.encode(AnyEncodable(value))).map { String(decoding: $0, as: UTF8.self) } ?? "{}"
+            send(result: ["content": [["type": "text", "text": text]], "isError": false], id: id)
+        default:
+            send(error: -32601, message: "Method not found", id: id)
+        }
+    }
+
+    func send(result: Any, id: Any) {
+        write(["jsonrpc": "2.0", "id": id, "result": result])
+    }
+
+    func send(error code: Int, message: String, id: Any) {
+        write(["jsonrpc": "2.0", "id": id, "error": ["code": code, "message": message]])
+    }
+
+    func write(_ object: [String: Any]) {
+        guard let data = try? JSONSerialization.data(withJSONObject: object, options: [.withoutEscapingSlashes]) else { return }
+        FileHandle.standardOutput.write(data + Data("\n".utf8))
+    }
+}
+
+struct AnyEncodable: Encodable {
+    let value: Encodable
+    init(_ value: Encodable) { self.value = value }
+    func encode(to encoder: Encoder) throws { try value.encode(to: encoder) }
+}

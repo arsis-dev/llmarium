@@ -80,7 +80,7 @@ Docker sur OrbStack avec Postgres, port `4000`. Alias : `ds4-flash`, `qwen3.6-mt
 
 - **KTD1. Structure d'Appothèque.** Package Swift avec `LauncherCore`, l'app SwiftUI (macOS 26+) et un exécutable CLI qui sert aussi de serveur MCP stdio. L'app et la CLI appellent le même noyau. Aucune dépendance externe, sauf éventuellement pour le proxy (KTD7).
 - **KTD2. Catalogue sous forme de données.** Un profil réunit un moteur, un modèle (identifiant upstream ou chemin), une quantification, un contexte, des flags et une recette. Chaque profil a un alias stable. La configuration machine vit dans `~/Library/Application Support/<App>/` ; le dépôt ne contient que des exemples.
-- **KTD3. Deux sortes d'adaptateurs moteur.** « Rattacher » pour oMLX (piloter son API, jamais le démarrer ni l'arrêter). « Lancer » pour MTPLX et mlx-serve (processus détenus par l'app). Un registre conserve PID, instant de démarrage et exécutable. Aucun signal n'est envoyé à un processus que l'app n'a pas lancé.
+- **KTD3. Deux sortes d'adaptateurs moteur.** « Rattacher » pour oMLX (piloter son API, jamais le démarrer ni l'arrêter). « Lancer » pour MTPLX et mlx-serve (processus détenus par l'app). Un registre conserve PID, instant de démarrage et exécutable. Un processus que l'app n'a pas lancé n'est arrêté que sur demande explicite de l'utilisateur, après un avertissement (clients connectés, lanceur qui pourrait le relancer) et une vérification que le PID désigne toujours le même processus ; l'arrêt forcé demande une seconde confirmation (décision de l'utilisateur, 8 octobre 2026). Le serveur MCP ne propose pas d'arrêt.
 - **KTD4. Mémoire avant tout chargement.** Estimation = poids sur disque + cache KV (d'après `config.json`) + marge, comparée à la mémoire disponible et aux processus présents. Par défaut, un seul gros modèle à la fois. Si le modèle ne tient pas, l'app propose quoi arrêter ou décharger ; elle ne le fait jamais seule. Chaque chargement mesure la mémoire réelle pour recaler l'estimation. Pour oMLX, utiliser son propre état (`/v1/models/status` : `final_ceiling`, tailles estimées et résidentes, secondes de chargement par Go) et tenir compte de son garde-fou, qui refuse des requêtes et évince des modèles sous pression (constaté à l'étape 0).
 - **KTD5. Recettes de harness sous forme de données.** Pour chaque harness : variables, arguments, fichier géré, protocole requis et conditions (contexte minimal…). Un couple impossible est grisé avec sa raison, sans traduction de protocole.
 - **KTD6. Écritures de configuration prudentes.** Une seule entrée gérée par fichier, sous l'identifiant `local-launcher`, sauvegardée et écrite de façon atomique. Le fichier est relu et validé avant remplacement. Les entrées d'oMLX, MTPLX, Daymon et de l'utilisateur ne sont jamais touchées. Un fichier illisible bloque l'écriture avec une explication. Les secrets restent dans le trousseau ou dans les stockages de secrets prévus par les harness, jamais dans les fichiers de config ni dans les arguments de commande.
@@ -100,7 +100,9 @@ Avec oMLX déjà actif, lancer Claude Code par variables d'environnement et Code
 
 **Terminé quand** `docs/compatibility.md` contient le résultat de chaque couple testé.
 
-### Étape 1 — Inventaire (lecture seule)
+### Étape 1 — Inventaire (lecture seule) — livrée le 6 octobre 2026
+
+App de barre de menus et fenêtre, CLI `lml` et serveur MCP stdio en lecture seule ; 14 tests sur dossiers factices. Sur la machine, l'inventaire a aussi trouvé deux liens oMLX vers des dossiers vides (téléchargements interrompus) en plus du lien `ministral` cassé.
 
 - Détecter les moteurs : binaire, version, état et port, identité via `/v1/models`.
 - Lister les modèles des quatre emplacements : taille, architecture, quantification et contexte maximal d'après `config.json`, moteurs compatibles.
@@ -108,9 +110,11 @@ Avec oMLX déjà actif, lancer Claude Code par variables d'environnement et Code
 - Vue mémoire : mémoire disponible et pression, empreinte des processus (modèles chargés en premier).
 - Interface : barre de menus et fenêtre comme Appothèque. CLI `status` et `models`. Outils MCP en lecture seule.
 
-**Terminé quand** l'inventaire retrouve l'état du 6 octobre : oMLX actif sur 8020, Qwen3.8-Flash-Next en double, lien ds4 cassé, quatre emplacements et leurs tailles.
+**Terminé quand** l'inventaire retrouve l'état du 6 octobre : oMLX actif sur 8020, Qwen3.8-Flash-Next présent en deux exemplaires, lien `ministral-3-14b-4bit` cassé dans oMLX, entrées vides du cache Hugging Face, quatre emplacements et leurs tailles. Les chemins à surveiller hors de ces emplacements (comme ds4) relèvent d'une configuration locale ultérieure.
 
 ### Étape 2 — Moteurs et mémoire
+
+Partiellement livrée le 8 octobre 2026. Livré : lancement depuis l'app, la CLI (`lml start`) et le MCP (`start_model`) ; estimation de la mémoire (`lml estimate`, `estimate_memory`) ; registre des serveurs lancés (`launched.json`, l'ancien KTD10 réintroduit) ; mesures réelles retenues (`measurements.json`). Les serveurs survivent à la fermeture de l'app. oMLX reste juge de ce qui tient chez lui (erreur 507) : l'estimation l'avertit sans bloquer ; pour MTPLX et mlx-serve, un modèle qui ne tient pas est refusé sauf demande explicite. Reste à faire pour clore l'étape : preuve réelle de mlx-serve (son plus petit modèle de langage fait 65 Go), passage d'un moteur à l'autre avec mesure (critère de fin ci-dessous), preuves d'appels d'outils sur `/v1/chat/completions` (KTD8) et reprise du test d'arrêt MTPLX après la correction des signaux. Également livré : section « En cours » (modèles en mémoire, lanceur retrouvé par la chaîne des processus ou leur environnement, clients connectés), déchargement d'un modèle oMLX, libération de la mémoire de ComfyUI (route `/free`, appliquée après la génération en cours) et arrêt d'un processus après confirmation. ComfyUI est reconnu par son API (`/system_stats`, `/queue`, `/history`), qui nomme les fichiers de modèles de chaque tâche.
 
 - Démarrer et arrêter un profil : rattachement à oMLX (load/unload), lancement de MTPLX et mlx-serve.
 - Disponibilité confirmée par l'identité du modèle, pas seulement par le port.

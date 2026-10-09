@@ -49,3 +49,15 @@ Non testés à cette étape :
 - Le serveur MTPLX de test (port 18090) a été lancé puis arrêté proprement ; aucun processus ne reste.
 - oMLX a évincé Qwen3.8-Flash-Next sous la pression, à laquelle ce serveur de test a contribué. Le modèle a été rechargé par le dernier test et est de nouveau chargé.
 - Aucune configuration utilisateur n'a été modifiée. Les sessions Codex du test sont restées dans un `CODEX_HOME` temporaire.
+
+## Lancement par l'app — 8 octobre 2026
+
+| Moteur | Modèle | Résultat | Mesures |
+|---|---|---|---|
+| MTPLX 2.11.3 | `Youssofal/Qwen3.5-4B-MTPLX-Optimized-Speed`, contexte 64K | ✅ `lml start` : prêt en 8 s sur 127.0.0.1:18100, toujours actif après la fin de la CLI, attribué à « Modèles locaux » | Estimé : 5,5 Go (2,4 Go de poids, 2 Go de cache à 64K, 1,1 Go de marge). Mesuré : 3 Go au démarrage, 4 Go après deux requêtes. Second lancement refusé par le contrôle mémoire (7,2 Go nécessaires d'après la mesure, 6,5 Go disponibles). |
+| oMLX 0.7.0 | `granite-embedding-311m` | ✅ chargé par l'API en 1 s, puis déchargé | — |
+| oMLX 0.7.0 | `Qwen3.8-Flash-Next-oQ4e-mtp` (chargé par un client) | Mesure retenue : 73 Go réels | 104 Go estimés d'après le dossier : la mesure remplace désormais la taille sur disque |
+
+- **Arrêt : le défaut venait de l'app, pas de MTPLX.** Le premier serveur lancé par l'app ignorait SIGTERM et SIGINT (`mtplx stop` a dû le tuer par SIGKILL), alors qu'un serveur lancé depuis un shell s'arrête en 2 s, même après une requête. Cause vérifiée : `posix_spawn` appelé depuis un fil Swift Concurrency transmettait l'état des signaux de ce fil. L'app réinitialise désormais les signaux au lancement (`POSIX_SPAWN_SETSIGDEF`, masque vide) ; un test le couvre. La reprise du test avec MTPLX attend que la mémoire le permette (114 Go sur 128 utilisés à ce moment). Aucun processus MTPLX orphelin n'est resté après l'arrêt forcé.
+- **Le raisonnement de MTPLX est actif par défaut** : avec `max_tokens` bas, la réponse reste vide, car tout est consommé par le raisonnement. À intégrer aux recettes (`--reasoning off` pour les clients qui attendent du texte ou du JSON).
+- mlx-serve écoute par défaut sur `0.0.0.0` : l'app impose `--host 127.0.0.1`. Son lancement réel reste à prouver.

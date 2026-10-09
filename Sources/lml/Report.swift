@@ -1,0 +1,177 @@
+import Foundation
+import ModelCore
+
+/// Plain-text views of a snapshot for the terminal.
+enum Report {
+    static func status(_ snapshot: InventorySnapshot) -> String {
+        var lines = ["\(snapshot.machine.chip) · \(Format.memory(snapshot.machine.memoryBytes)) · \(snapshot.machine.systemVersion)", ""]
+        lines.append("Moteurs")
+        for engine in snapshot.engines { lines.append(contentsOf: self.engine(engine)) }
+        lines.append("")
+        lines.append(running(snapshot.running))
+        lines.append("")
+        lines.append(memorySummary(snapshot.memory.stats, omlx: snapshot.engine(.omlx)?.omlx))
+        let disk = snapshot.disk
+        lines.append("Disque : \(disk.volumeAvailableBytes.map(Format.bytes) ?? "—") libres, modèles \(Format.bytes(disk.modelBytes)) · \(snapshot.models.count) modèles, \(disk.architectureGroups.count) architectures en plusieurs exemplaires, \(disk.brokenLinkIDs.count) lien(s) cassé(s), \(disk.emptyCacheEntries.count) entrée(s) vide(s)")
+        return lines.joined(separator: "\n")
+    }
+
+    static func engine(_ engine: EngineStatus) -> [String] {
+        let installation = engine.installation
+        let version = installation.version.map { " \($0)" } ?? ""
+        guard installation.isInstalled else { return ["  \(engine.kind.title) : non installé"] }
+        guard engine.isRunning else { return ["  \(engine.kind.title)\(version) : arrêté"] }
+        var lines: [String] = []
+        for instance in engine.instances {
+            let ports = instance.ports.map(String.init).joined(separator: ", ")
+            lines.append("  \(engine.kind.title)\(version) : actif, PID \(instance.pid), port \(ports.isEmpty ? "—" : ports), \(instance.api.title), \(Format.memory(instance.footprintBytes))")
+            if let omlx = engine.omlx {
+                let loaded = omlx.models.filter { $0.loaded || $0.isLoading }
+                lines.append("    chargé : " + (loaded.isEmpty ? "aucun modèle" : loaded.map { "\($0.id)\($0.isLoading ? " (chargement)" : "") \($0.residentBytes.map(Format.memory) ?? "")" }.joined(separator: ", ")))
+                lines.append("    exposés par l'API : \(instance.servedModels.count) · plafond mémoire oMLX : \(omlx.ceilingBytes.map(Format.memory) ?? "—")")
+            } else if !instance.servedModels.isEmpty {
+                lines.append("    servi : " + instance.servedModels.joined(separator: ", "))
+            }
+        }
+        return lines
+    }
+
+    static func running(_ running: [RunningModel]) -> String {
+        guard !running.isEmpty else { return "En mémoire : aucun modèle" }
+        var lines = ["En mémoire"]
+        for model in running {
+            let ports = model.ports.isEmpty ? "" : ", port \(model.ports.map(String.init).joined(separator: ", "))"
+            let since = model.startedAt.map { ", depuis \($0.formatted(date: .abbreviated, time: .shortened))" } ?? ""
+            lines.append("  \(pad(Format.memory(model.footprintBytes), 9)) \(model.title) [\(model.role.title)] · PID \(model.pid)\(ports)\(since)")
+            if let comfyUI = model.comfyUI {
+                lines.append("            activité : \(comfyUI.activity)")
+                if !comfyUI.models.isEmpty {
+                    lines.append("            modèles\(comfyUI.modelsFromHistory ? " (dernière génération)" : "") : \(comfyUI.models.joined(separator: ", "))")
+                }
+            }
+            let certainty = model.launcher.certainty == .probable ? " (probable, d'après son environnement)" : ""
+            lines.append("            lancé par : \(model.launcher.summary)\(certainty)")
+            if let project = model.launcher.projectPath { lines.append("            projet : \(project)") }
+            if model.launcher.isOrphan { lines.append("            orphelin : son lanceur n'est plus actif") }
+            lines.append("            clients connectés : " + (model.clients.isEmpty ? "aucun à cet instant" : model.clients.map { "\($0.title) (\($0.pid))" }.joined(separator: ", ")))
+        }
+        return lines.joined(separator: "\n")
+    }
+
+    static func estimate(_ estimate: MemoryEstimate, model: LocalModel, engine: EngineKind, engines: [EngineKind]) -> String {
+        var lines = ["\(model.name) sur \(engine.title)" + (engines.count > 1 ? " (aussi possible : \(engines.filter { $0 != engine }.map(\.title).joined(separator: ", ")))" : "")]
+        let weightsSource = estimate.weightsMeasurement.map { "  mesuré (\($0.source), \($0.measuredAt.formatted(date: .abbreviated, time: .omitted)))" } ?? "  taille sur disque"
+        lines.append("  poids        \(pad(Format.memory(estimate.weightsBytes), 9))\(weightsSource)")
+        let perToken = estimate.kvBytesPerToken.map { " (\(Format.memory($0 * 1024)) pour 1K tokens)" } ?? ""
+        lines.append("  contexte     \(pad(Format.memory(estimate.kvCacheBytes), 9))  \(Format.tokens(estimate.context)) tokens\(perToken)")
+        lines.append("  marge        \(pad(Format.memory(estimate.overheadBytes), 9))  exécution")
+        lines.append("  total        \(pad(Format.memory(estimate.totalBytes), 9))")
+        lines.append("  disponible   \(pad(Format.memory(max(0, estimate.availableBytes)), 9))  \(estimate.availableBasis)")
+        switch estimate.verdict {
+        case .fits: lines.append("→ Tient en mémoire.")
+        case .tight: lines.append("→ Tient, mais de justesse.")
+        case .tooLarge: lines.append("→ Ne tient pas : il manque \(Format.memory(estimate.shortfallBytes)).")
+        }
+        if estimate.verdict != .fits, !estimate.toFree.isEmpty {
+            lines.append("Pour libérer de la place :")
+            for candidate in estimate.toFree.prefix(6) {
+                lines.append("  \(pad(Format.memory(candidate.bytes), 9)) \(candidate.title)\(candidate.detail.map { " · \($0)" } ?? "")")
+            }
+        }
+        lines += estimate.notes.map { "Note : \($0)" }
+        return lines.joined(separator: "\n")
+    }
+
+    static func start(_ outcome: StartOutcome, model: LocalModel, engine: EngineKind) -> String {
+        if let refusal = outcome.refusal {
+            return "Non lancé : \(refusal)\n\n" + estimate(outcome.estimate, model: model, engine: engine, engines: [engine])
+        }
+        switch outcome.result {
+        case .ready(let server, let served, let seconds):
+            return "Prêt en \(seconds) s : \(served.joined(separator: ", ")) sur http://127.0.0.1:\(server.port)/v1 (PID \(server.pid))\nJournal : \(server.logPath)"
+        case .loadedInOMLX(let id, let seconds):
+            return "\(id) chargé dans oMLX en \(seconds) s."
+        case .failed(let reason, let log):
+            return "Échec : \(reason)" + (log.map { "\n--- fin du journal ---\n\($0)" } ?? "")
+        case nil:
+            return "Rien n'a été lancé."
+        }
+    }
+
+    static func memorySummary(_ stats: MemoryStats, omlx: OMLXState?) -> String {
+        "Mémoire : \(Format.memory(stats.usedBytes)) utilisés sur \(Format.memory(stats.totalBytes)), pression \(stats.pressure.title.lowercased()), marge macOS \(stats.freePercent.map { "\($0) %" } ?? "—") (mémoire inactive comprise)"
+    }
+
+    static func memory(_ report: MemoryReport, omlx: OMLXState?) -> String {
+        let stats = report.stats
+        var lines = [memorySummary(stats, omlx: omlx),
+                     "  applications \(Format.memory(stats.appBytes)) · réservée \(Format.memory(stats.wiredBytes)) · compressée \(Format.memory(stats.compressedBytes)) · fichiers en cache \(Format.memory(stats.cachedFilesBytes))",
+                     "", "Plus gros consommateurs"]
+        for group in report.groups.prefix(15) {
+            let marker = group.role == .application ? "" : " [\(group.role.title)]"
+            lines.append("  \(pad(Format.memory(group.footprintBytes), 9)) \(group.title)\(marker)\(group.detail.map { " · \($0)" } ?? "")")
+        }
+        return lines.joined(separator: "\n")
+    }
+
+    static func models(_ snapshot: InventorySnapshot, all: Bool) -> String {
+        let models = snapshot.models.filter { all || $0.kind == .languageModel || $0.isBrokenLink }
+        var lines: [String] = []
+        for store in StoreKind.allCases {
+            let inStore = models.filter { $0.store == store }
+            guard !inStore.isEmpty else { continue }
+            lines.append("\(store.title) (\(inStore.count))")
+            for model in inStore {
+                lines.append("  \(pad(model.isLink ? "lien" : Format.bytes(model.sizeBytes), 9)) \(model.name)  \(describe(model))")
+            }
+            lines.append("")
+        }
+        if !all { lines.append("Modèles de langage uniquement ; --all pour tout afficher.") }
+        return lines.joined(separator: "\n")
+    }
+
+    static func describe(_ model: LocalModel) -> String {
+        if model.isBrokenLink { return "LIEN CASSÉ (\(model.brokenReason ?? "?")) → \(model.linkTarget ?? "?")" }
+        var parts = [model.format.title]
+        if let spec = model.spec {
+            if let type = spec.modelType { parts.append(type) }
+            if let bits = spec.quantBits { parts.append("\(bits) bits") }
+            if let context = spec.maxContext { parts.append("contexte \(Format.tokens(context))") }
+            if spec.isPartial { parts.append("métadonnées partielles") }
+        }
+        if let target = model.linkTarget { parts.append("→ \(target)") }
+        return parts.joined(separator: " · ")
+    }
+
+    static func disk(_ snapshot: InventorySnapshot) -> String {
+        let disk = snapshot.disk
+        var lines = ["Volume : \(disk.volumeAvailableBytes.map(Format.bytes) ?? "—") libres sur \(disk.volumeTotalBytes.map(Format.bytes) ?? "—")", "", "Emplacements"]
+        for usage in disk.stores {
+            let state = usage.exists ? "\(Format.bytes(usage.totalBytes)) · \(usage.modelCount) modèles" : "absent"
+            lines.append("  \(pad(usage.store.kind.title, 20)) \(state)  \(usage.store.path)")
+        }
+        lines += ["", "Même architecture, probablement le même modèle de base"]
+        if disk.architectureGroups.isEmpty { lines.append("  aucune") }
+        for group in disk.architectureGroups {
+            lines.append("  \(Format.bytes(group.totalBytes)) · \(group.modelType)")
+            for id in group.modelIDs {
+                let model = snapshot.model(id: id)
+                lines.append("    \(pad(model.map { Format.bytes($0.sizeBytes) } ?? "", 9)) \(model.map { "\($0.store.title) · \($0.name)" } ?? id)")
+            }
+        }
+        lines += ["", "Liens cassés"]
+        if disk.brokenLinkIDs.isEmpty { lines.append("  aucun") }
+        for id in disk.brokenLinkIDs {
+            let model = snapshot.model(id: id)
+            lines.append("  \(model?.path ?? id) → \(model?.linkTarget ?? "?") (\(model?.brokenReason ?? "?"))")
+        }
+        lines += ["", "Entrées vides du cache Hugging Face (\(Format.bytes(disk.emptyCacheBytes)))"]
+        if disk.emptyCacheEntries.isEmpty { lines.append("  aucune") }
+        for entry in disk.emptyCacheEntries { lines.append("  \(entry.name)") }
+        return lines.joined(separator: "\n")
+    }
+
+    static func pad(_ text: String, _ width: Int) -> String {
+        text.count >= width ? text : String(repeating: " ", count: width - text.count) + text
+    }
+}
