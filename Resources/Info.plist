@@ -13,4 +13,5 @@
     <key>LSUIElement</key><true/>
     <key>NSHighResolutionCapable</key><true/>
     <key>NSPrincipalClass</key><string>NSApplication</string>
+    <key>NSAppleEventsUsageDescription</key><string>Modèles locaux ouvre une fenêtre Ghostty dans le dossier choisi pour y lancer le harness avec le modèle local.</string>
 </dict></plist>

@@ -128,6 +128,10 @@ public struct LaunchAttributor {
         // Exact executable name first: the Claude app bundles Claude Code as `…/claude.app/…/claude`,
         // while the app itself runs as `Claude`.
         if let agent = Self.agents[process.name] { return LaunchStep(agent) }
+        // Node agents often retitle themselves: `node` for macOS, `pi` in argv[0].
+        if let first = process.arguments.first.map({ ($0 as NSString).lastPathComponent }), let agent = Self.agents[first] {
+            return LaunchStep(agent)
+        }
         if let app = process.appName { return LaunchStep(app) }
         let name = process.name.lowercased()
         if Self.shells.contains(name) { return nil }

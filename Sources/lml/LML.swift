@@ -16,6 +16,9 @@ struct LML {
                             Mémoire nécessaire, disponible, et quoi libérer
       lml start <modèle> [--engine …] [--context N] [--port N] [--force]
                             Charge le modèle (refusé s'il ne tient pas, sauf --force)
+      lml open <harness> [--model …] [--dir dossier] [--headless "consigne"] [--dry-run]
+                            Ouvre le modèle dans claude, codex, pi, opencode ou dsh
+                            (fenêtre Ghostty ; --headless : une fois, sans interface)
       lml mcp               Serveur MCP sur stdio
     Option : --json pour une sortie JSON.
     L'arrêt et le déchargement se font dans l'app, après confirmation.
@@ -84,6 +87,55 @@ struct LML {
                 if outcome.refusal != nil { exit(1) }
                 if case .failed = outcome.result { exit(1) }
             }
+        case "open":
+            guard let name = options.positional.dropFirst().first,
+                  let kind = HarnessKind.allCases.first(where: { [$0.rawValue.lowercased(), $0.command ?? "dsh", $0.title.lowercased()].contains(name.lowercased()) }) else {
+                fail("Précisez un harness : claude, codex, pi, opencode ou dsh.")
+            }
+            var snapshot = await Inventory.take()
+            var targets = HarnessTarget.targets(in: snapshot)
+            let query = options.value("model")
+            var target = targets.first { query == nil || $0.modelID.localizedCaseInsensitiveContains(query!) }
+            if target == nil, let query {
+                // Not running yet: start it first, with the usual memory check.
+                guard case .success(let model) = ModelResolver.find(query, in: snapshot.models),
+                      let engine = EngineCompatibility.engines(for: model, snapshot: snapshot).first else {
+                    fail("Aucun modèle en cours ni lançable ne correspond à « \(query) ».")
+                }
+                print("Lancement de \(model.name) sur \(engine.title)…")
+                let outcome = await ModelStarter.start(model, engine: engine, context: nil, snapshot: snapshot)
+                if let refusal = outcome.refusal { fail("Non lancé : \(refusal)") }
+                if case .failed(let reason, _) = outcome.result { fail("Échec : \(reason)") }
+                snapshot = await Inventory.take()
+                targets = HarnessTarget.targets(in: snapshot)
+                target = targets.first { $0.modelID.localizedCaseInsensitiveContains(query) || query.localizedCaseInsensitiveContains($0.modelID) }
+            }
+            guard let target else {
+                fail(targets.isEmpty ? "Aucun modèle en cours : lancez-en un (lml start …) ou précisez --model."
+                                     : "Modèles en cours : \(targets.map(\.modelID).joined(separator: ", ")).")
+            }
+            if let reason = HarnessPlanner.unavailableReason(kind, target: target, installed: HarnessInstallations.detect()) { fail(reason) }
+            let directory = options.value("dir").map { ($0 as NSString).expandingTildeInPath } ?? FileManager.default.currentDirectoryPath
+            do {
+                let launch = try HarnessPlanner.prepare(kind, target: target, directory: directory)
+                for file in launch.writtenFiles { print("Configuré : \(file)") }
+                if options.flag("dry-run") {
+                    print("Commande : \(launch.arguments.joined(separator: " "))\(launch.appToOpen.map { "ouvrir \($0)" } ?? "")")
+                    print("Variables : \(launch.environment.keys.sorted().joined(separator: ", "))")
+                    exit(0)
+                }
+                if let prompt = options.value("headless") {
+                    let status = HarnessOpener.runHeadless(try HarnessPlanner.headless(launch, prompt: prompt, target: target), launch: launch)
+                    exit(status)
+                }
+                try HarnessOpener.open(launch)
+                print("\(kind.title) ouvert avec \(target.modelID) (\(target.engine.title), \(target.baseURL)) dans \(directory).")
+                if kind == .deepseekHarness {
+                    print("Choisissez « \(target.modelID) (local) » dans le sélecteur de modèle. Si l'app était déjà ouverte, redémarrez-la pour qu'elle relise sa configuration.")
+                }
+            } catch {
+                fail("\(error)")
+            }
         case "help", "-h":
             print(usage)
         default:
@@ -107,7 +159,7 @@ struct Options {
     var positional: [String] = []
     var values: [String: String] = [:]
     var flags: Set<String> = []
-    static let valued: Set<String> = ["engine", "context", "port"]
+    static let valued: Set<String> = ["engine", "context", "port", "model", "dir", "headless"]
 
     init(_ arguments: [String]) {
         var index = 0

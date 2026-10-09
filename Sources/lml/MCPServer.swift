@@ -52,6 +52,31 @@ struct MCPServer {
                 return Pending(message: "\(model.name) se charge toujours sur \(engine.title) après 25 s. Il apparaîtra dans list_running_models une fois prêt.")
             }
         },
+        Tool(name: "open_in_harness",
+             description: "Ouvre pour l'utilisateur, dans une fenêtre Ghostty du dossier donné, un harness (claude, codex, pi, opencode) branché sur un modèle déjà en mémoire ; « dsh » configure DeepSeek Harness et ouvre l'app. Ne lance pas de modèle : utiliser start_model avant si besoin.",
+             properties: [
+                "harness": ["type": "string", "enum": ["claude", "codex", "pi", "opencode", "dsh"]],
+                "model": ["type": "string", "description": "Partie du nom d'un modèle en cours ; par défaut le premier."],
+                "directory": ["type": "string", "description": "Dossier du projet (chemin absolu ou ~)."]
+             ],
+             required: ["harness", "directory"], readOnly: false) { arguments in
+            let name = (arguments["harness"] as? String ?? "").lowercased()
+            guard let kind = HarnessKind.allCases.first(where: { ($0.command ?? "dsh") == name }) else { return Failure(error: "Harness inconnu.") }
+            let snapshot = await Inventory.take()
+            let query = arguments["model"] as? String
+            guard let target = HarnessTarget.targets(in: snapshot).first(where: { query == nil || $0.modelID.localizedCaseInsensitiveContains(query!) }) else {
+                return Failure(error: "Aucun modèle en cours ne correspond ; lancez-le d'abord avec start_model.")
+            }
+            if let reason = HarnessPlanner.unavailableReason(kind, target: target, installed: HarnessInstallations.detect()) { return Failure(error: reason) }
+            let directory = ((arguments["directory"] as? String ?? "~") as NSString).expandingTildeInPath
+            do {
+                let launch = try HarnessPlanner.prepare(kind, target: target, directory: directory)
+                try HarnessOpener.open(launch)
+                return Opened(harness: kind.title, model: target.modelID, url: target.baseURL, directory: directory, configuredFiles: launch.writtenFiles)
+            } catch {
+                return Failure(error: "\(error)")
+            }
+        },
         Tool(name: "get_disk_report",
              description: "Occupation des dossiers de modèles, architectures présentes en plusieurs exemplaires, liens cassés et entrées vides du cache Hugging Face. Ne supprime rien.") { _ in
             await Inventory.take().disk
@@ -71,6 +96,14 @@ struct MCPServer {
     ]
 
     struct Failure: Encodable { var error: String }
+
+    struct Opened: Encodable {
+        var harness: String
+        var model: String
+        var url: String
+        var directory: String
+        var configuredFiles: [String]
+    }
 
     struct Pending: Encodable {
         var started = false
@@ -165,7 +198,7 @@ struct MCPServer {
                 "protocolVersion": requested ?? Self.protocolVersion,
                 "capabilities": ["tools": ["listChanged": false]],
                 "serverInfo": ["name": "local-model-launcher", "version": "0.1.0"],
-                "instructions": "Moteurs et modèles locaux de ce Mac. Tous les outils sont en lecture seule sauf start_model, qui charge un modèle après un contrôle de mémoire. Aucun outil n'arrête, ne décharge ni ne supprime : cela se fait dans l'app, après confirmation."
+                "instructions": "Moteurs et modèles locaux de ce Mac. Tous les outils sont en lecture seule sauf start_model, qui charge un modèle après un contrôle de mémoire, et open_in_harness, qui ouvre un harness pour l'utilisateur. Aucun outil n'arrête, ne décharge ni ne supprime : cela se fait dans l'app, après confirmation."
             ], id: id)
         case "ping":
             send(result: [:], id: id)

@@ -66,7 +66,8 @@ public enum RunningModelDetector {
         let owners = [process.pid, process.parentPID, process.responsiblePID ?? process.pid, ProcessInfo.processInfo.processIdentifier]
         let clientPIDs = Set(ports.flatMap { portTable.clients[$0] ?? [] }).subtracting(owners)
         let clients = clientPIDs.sorted().map { pid in
-            ClientProcess(pid: pid, title: table[pid].map { $0.appName ?? $0.name } ?? "PID \(pid)")
+            // Name agents by what they are (`node …/pi` is Pi), as the launcher chain does.
+            ClientProcess(pid: pid, title: table[pid].map { attributor.step(for: $0)?.title ?? $0.appName ?? $0.name } ?? "PID \(pid)")
         }
         return RunningModel(pid: process.pid, role: role, models: models, processDescription: description, ports: ports,
                             footprintBytes: process.footprintBytes, startedAt: process.startedAt,

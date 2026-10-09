@@ -40,6 +40,8 @@ final class InventoryModel: ObservableObject {
     }
 
     private var lastFullScan: Date?
+    /// Harnesses found in the login shell; looked up again on each full scan (it runs the shell once).
+    @Published private(set) var installedHarnesses: Set<HarnessKind> = []
 
     /// A full scan walks every model folder (under a second here); engines and memory alone are cheaper.
     func refresh(full: Bool = false) async {
@@ -51,6 +53,7 @@ final class InventoryModel: ObservableObject {
         } else {
             snapshot = await Inventory.take()
             lastFullScan = Date()
+            installedHarnesses = await Task.detached { HarnessInstallations.detect() }.value
         }
     }
 

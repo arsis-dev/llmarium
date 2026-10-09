@@ -61,3 +61,19 @@ Non testés à cette étape :
 - **Arrêt : le défaut venait de l'app, pas de MTPLX.** Le premier serveur lancé par l'app ignorait SIGTERM et SIGINT (`mtplx stop` a dû le tuer par SIGKILL), alors qu'un serveur lancé depuis un shell s'arrête en 2 s, même après une requête. Cause vérifiée : `posix_spawn` appelé depuis un fil Swift Concurrency transmettait l'état des signaux de ce fil. L'app réinitialise désormais les signaux au lancement (`POSIX_SPAWN_SETSIGDEF`, masque vide) ; un test le couvre. La reprise du test avec MTPLX attend que la mémoire le permette (114 Go sur 128 utilisés à ce moment). Aucun processus MTPLX orphelin n'est resté après l'arrêt forcé.
 - **Le raisonnement de MTPLX est actif par défaut** : avec `max_tokens` bas, la réponse reste vide, car tout est consommé par le raisonnement. À intégrer aux recettes (`--reasoning off` pour les clients qui attendent du texte ou du JSON).
 - mlx-serve écoute par défaut sur `0.0.0.0` : l'app impose `--host 127.0.0.1`. Son lancement réel reste à prouver.
+
+## Harness ouverts par l'app — 9 octobre 2026
+
+Modèle : `Qwen3.8-27B-Huihui-Abliterated-oQ6e-MTP-MLX` sur oMLX 0.7.0 (déjà chargé), même méthode du jeton qu'à l'étape 0, via `lml open <harness> --headless`.
+
+| Harness | Mécanisme | Protocole | Résultat | Durée |
+|---|---|---|---|---|
+| Claude Code 2.1.288 | Variables d'environnement, config utilisateur complète (plugins, hooks, MCP) | `/v1/messages` | ✅ | 44 s |
+| Codex CLI 0.154.0 | `CODEX_HOME` propre à l'app | `/v1/responses` | ✅ ≈ 10 000 tokens | 24 s |
+| Pi 1.0.0 | Entrée `local-launcher` dans `models.json` | `/v1/chat/completions` | ✅ | 13 s |
+| OpenCode 2.0.8 | `OPENCODE_CONFIG_CONTENT` + `--standalone` | `/v1/chat/completions` | ✅ outil Read | 45 s (36 s au premier essai manuel) |
+| DeepSeek Harness | Fournisseur `local-launcher` dans `cordis.patch.yml` | `openai-completions` | ⏳ patch validé sur copie ; session dans l'app à faire | — |
+
+- Fenêtre Ghostty : Claude Code ouvert pour de bon dans le dossier choisi, sur le bon modèle.
+- Ghostty avait été démarré depuis une session Claude Code et passait ses variables `CLAUDE_*` à toutes ses fenêtres (`CLAUDE_CODE_CHILD_SESSION` coupait l'historique de Claude Code). Les fenêtres ouvertes par l'app effacent ces marqueurs, sauf les variables qu'elle définit.
+- Le fournisseur DeepSeek Harness déclare `apiKeyEnv: LOCAL_LAUNCHER_API_KEY`, comme votre fournisseur `dwarfstar` ; l'app ouverte par `open` ne reçoit pas cette variable. À vérifier lors de la première session.

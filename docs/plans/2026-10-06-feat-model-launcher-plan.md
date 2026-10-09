@@ -124,7 +124,9 @@ Partiellement livrée le 8 octobre 2026. Livré : lancement depuis l'app, la CLI
 
 **Terminé quand** le passage d'un profil MTPLX à un profil mlx-serve ne laisse aucun processus orphelin, et que l'écart entre mémoire estimée et mesurée est enregistré.
 
-### Étape 3 — Harness
+### Étape 3 — Harness — livrée le 9 octobre 2026, sauf la preuve DeepSeek Harness
+
+Claude Code, Codex, Pi et OpenCode 2 ont chacun terminé une session avec appel d'outil sur un modèle oMLX, lancés par `lml open … --headless` avec exactement la configuration utilisée pour les fenêtres ; Claude Code a aussi été ouvert pour de bon dans Ghostty. Les configurations de l'utilisateur sont identiques octet pour octet, sauf `models.json` de Pi (entrée ajoutée, clés réordonnées). DeepSeek Harness : patch validé sur une copie du vrai fichier (YAML valide, seul notre bloc ajouté) ; la session dans l'app reste à faire par l'utilisateur. Écarts au plan : OpenCode passe par `OPENCODE_CONFIG_CONTENT` (aucune écriture) ; Codex par un `CODEX_HOME` propre à l'app ; les fenêtres effacent les marqueurs de session hérités de Ghostty.
 
 - Action « Ouvrir dans… » : modèle, harness, dossier → nouvelle fenêtre Ghostty.
 - En V1, les harness pointent directement vers le port du moteur.

@@ -7,6 +7,13 @@ struct RunningView: View {
     var snapshot: InventorySnapshot
     @EnvironmentObject private var model: InventoryModel
     @State private var pending: PendingAction?
+    @State private var harnessRequest: HarnessRequest?
+
+    struct HarnessRequest: Identifiable {
+        var target: HarnessTarget
+        var kind: HarnessKind
+        var id: String { "\(target.modelID)-\(kind.rawValue)" }
+    }
 
     enum PendingAction: Identifiable {
         case unload(RunningModel, String)
@@ -88,7 +95,10 @@ struct RunningView: View {
                         }
                     }
                     ForEach(snapshot.running) { running in
-                        RunningCard(running: running, busy: model.busyPID == running.pid) { pending = $0 }
+                        RunningCard(running: running, busy: model.busyPID == running.pid,
+                                    targets: HarnessTarget.targets(in: snapshot).filter { $0.baseURL == running.baseURL },
+                                    installed: model.installedHarnesses,
+                                    openHarness: { target, kind in harnessRequest = HarnessRequest(target: target, kind: kind) }) { pending = $0 }
                     }
                 }
                 .formStyle(.grouped)
@@ -110,6 +120,9 @@ struct RunningView: View {
         } message: { action in
             Text(action.message)
         }
+        .sheet(item: $harnessRequest) { request in
+            HarnessSheet(target: request.target, initial: request.kind)
+        }
         .alert(model.outcome?.title ?? "", isPresented: Binding(get: { model.outcome != nil }, set: { if !$0 { model.outcome = nil } }),
                presenting: model.outcome) { outcome in
             if let candidate = outcome.forceCandidate {
@@ -125,6 +138,9 @@ struct RunningView: View {
 struct RunningCard: View {
     var running: RunningModel
     var busy: Bool
+    var targets: [HarnessTarget] = []
+    var installed: Set<HarnessKind> = []
+    var openHarness: (HarnessTarget, HarnessKind) -> Void = { _, _ in }
     var ask: (RunningView.PendingAction) -> Void
 
     var body: some View {
@@ -176,6 +192,21 @@ struct RunningCard: View {
             LabeledContent("Clients connectés",
                            value: running.clients.isEmpty ? "Aucun à cet instant" : running.clients.map(\.title).joined(separator: ", "))
             HStack {
+                if !targets.isEmpty {
+                    Menu("Ouvrir dans…") {
+                        ForEach(targets, id: \.modelID) { target in
+                            SwiftUI.Section(targets.count > 1 ? target.modelID : "") {
+                                ForEach(HarnessKind.allCases) { kind in
+                                    let reason = HarnessPlanner.unavailableReason(kind, target: target, installed: installed)
+                                    Button(kind.title) { openHarness(target, kind) }
+                                        .disabled(reason != nil)
+                                        .help(reason ?? "")
+                                }
+                            }
+                        }
+                    }
+                    .fixedSize()
+                }
                 Spacer()
                 if busy { ProgressView().controlSize(.small) }
                 if running.comfyUI != nil {

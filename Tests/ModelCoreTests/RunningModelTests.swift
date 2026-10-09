@@ -72,6 +72,11 @@ final class AttributionTests: XCTestCase {
                           "a reused PID is not this app's server")
     }
 
+    func testAgentsThatRetitleThemselves() {
+        let pi = process(5, "node", "/fnm/bin/node", parent: 1, arguments: ["pi"])
+        XCTAssertEqual(attributor([pi]).step(for: pi)?.title, "Pi")
+    }
+
     func testModelHints() {
         func hint(_ arguments: [String]) -> String? {
             RunningProcess(pid: 1, name: "python", executablePath: "/p", arguments: arguments, footprintBytes: 0).modelHint
