@@ -144,6 +144,11 @@ struct MCPServer {
             }
             return Pending(message: "Mesure de \(target.modelID) en cours ; le résultat apparaîtra dans list_benchmarks.")
         },
+        Tool(name: "get_radar",
+             description: "Nouveaux modèles de langage au format MLX qui tiennent dans la mémoire de ce Mac et n'y sont pas encore : tendances Hugging Face, nouveautés des auteurs suivis, favoris Spicilege, autres versions des modèles présents. Chaque modèle donne ses raisons ; les modèles écartés aussi. Liste du jour (mise en cache 24 h). Lecture seule : le téléchargement se fait dans l'app ou avec lml radar download.",
+             properties: ["refresh": ["type": "boolean", "description": "Forcer une nouvelle recherche."]]) { arguments in
+            await Radar.report(snapshot: await Inventory.take(), refresh: arguments["refresh"] as? Bool ?? false)
+        },
         Tool(name: "get_disk_report",
              description: "Occupation des dossiers de modèles, architectures présentes en plusieurs exemplaires, liens cassés et entrées vides du cache Hugging Face. Ne supprime rien.") { _ in
             await Inventory.take().disk

@@ -29,6 +29,10 @@ struct LML {
                             Recettes : réglages appliqués au lancement, sources et pièges connus
       lml bench <modèle> | list
                             Banc d'essai d'un modèle en mémoire, ou comparaison des mesures
+      lml radar [--refresh] [--all]
+                            Nouveaux modèles lançables sur ce Mac, avec leurs raisons (--all : les exclus aussi)
+      lml radar download <owner/name> [--engine …] [--yes]
+                            Télécharge un modèle après contrôle de l'espace disque
       lml mcp               Serveur MCP sur stdio
     Option : --json pour une sortie JSON.
     L'arrêt et le déchargement se font dans l'app, après confirmation.
@@ -296,6 +300,37 @@ struct LML {
                                              omlxURL: snapshot.engine(.omlx)?.instances.first?.url) { step in print("  \(step)…") }
             do { try BenchmarkStore.shared.add(result) } catch { fail("\(error)") }
             print(Report.benchmark(result))
+        case "radar" where options.positional.dropFirst().first == "download":
+            guard let repo = options.positional.dropFirst(2).first, repo.contains("/") else { fail("lml radar download <owner/name> [--engine omlx|mtplx|mlx-serve] [--yes]") }
+            let snapshot = await Inventory.take()
+            let item = Radar.cached()?.items.first { $0.id == repo }
+            let engine = options.value("engine").flatMap { name in EngineKind.allCases.first { $0.rawValue.lowercased() == name.lowercased().replacingOccurrences(of: "-", with: "") } }
+                ?? item?.engines.first ?? RadarFilter.engines(for: repo).first!
+            let detail = item == nil ? (try? await HubAPI.detail(repo)) ?? nil : nil
+            if item?.gated == true || detail?.gated == true {
+                fail("Ce modèle demande d'accepter ses conditions sur Hugging Face : faites-le sur https://huggingface.co/\(repo), puis « hf auth login », et réessayez.")
+            }
+            if detail?.isAdapter == true { fail("C'est un adaptateur LoRA : les moteurs ne le servent pas seul.") }
+            let size = item?.sizeBytes ?? detail?.sizeBytes
+            if let refusal = RadarDownload.diskRefusal(sizeBytes: size, freeBytes: snapshot.disk.volumeAvailableBytes) { fail(refusal) }
+            let plan = RadarDownload.plan(repo: repo, engine: engine, sizeBytes: size)
+            print("Téléchargement de https://huggingface.co/\(repo)")
+            print("  taille \(size.map(Format.bytes) ?? "?") · vers \(plan.destination) · \(snapshot.disk.volumeAvailableBytes.map(Format.bytes) ?? "?") libres")
+            print("  commande : \(plan.command.arguments.joined(separator: " "))")
+            if !options.flag("yes") {
+                print("Continuer ? [o/N] ", terminator: "")
+                guard let answer = readLine(), ["o", "oui", "y", "yes"].contains(answer.lowercased()) else { fail("Annulé.") }
+            }
+            let process = Process()
+            process.executableURL = URL(fileURLWithPath: HarnessInstallations.userShell)
+            process.arguments = ["-lc", plan.command.arguments.map { "'" + $0.replacingOccurrences(of: "'", with: "'\\''") + "'" }.joined(separator: " ")]
+            do { try process.run() } catch { fail("\(error)") }
+            process.waitUntilExit()
+            exit(process.terminationStatus)
+        case "radar":
+            let snapshot = await Inventory.take()
+            let report = await Radar.report(snapshot: snapshot, refresh: options.flag("refresh"))
+            json ? emit(report) : print(Report.radar(report, all: all))
         case "help", "-h":
             print(usage)
         default:

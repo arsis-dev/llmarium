@@ -430,7 +430,18 @@ public enum HarnessInstallations {
         return found
     }
 
-    static var userShell: String { ProcessInfo.processInfo.environment["SHELL"].flatMap { $0.isEmpty ? nil : $0 } ?? "/bin/zsh" }
+    public static var userShell: String { ProcessInfo.processInfo.environment["SHELL"].flatMap { $0.isEmpty ? nil : $0 } ?? "/bin/zsh" }
+}
+
+/// A command to run in a terminal window, outside any harness.
+public struct TerminalCommand: Equatable, Sendable {
+    public var arguments: [String]
+    public var directory: String
+
+    public init(arguments: [String], directory: String) {
+        self.arguments = arguments
+        self.directory = directory
+    }
 }
 
 public enum HarnessOpener {
@@ -459,6 +470,12 @@ public enum HarnessOpener {
         if let error {
             throw OpenError(message: (error[NSAppleScript.errorMessage] as? String) ?? "Ghostty n'a pas pu ouvrir la fenêtre.")
         }
+    }
+
+    /// A plain command in a Ghostty window (a download, `mtplx tune`): the user watches it and can interrupt it.
+    public static func open(_ command: TerminalCommand) throws {
+        try open(HarnessLaunch(kind: .claudeCode, arguments: command.arguments, environment: [:], directory: command.directory,
+                               appToOpen: nil, writtenFiles: []))
     }
 
     public struct OpenError: Error, CustomStringConvertible {

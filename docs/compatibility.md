@@ -106,3 +106,19 @@ Non testé : une API distante réelle (aucune clé saisie), Watslog branché sur
 - La recette MTPLX `--reasoning off` est bien passée au serveur (`--reasoning-mode off`) et le banc n'a reçu aucun raisonnement.
 - Le serveur MTPLX lancé par l'app s'est arrêté en 2 s sur SIGTERM : la correction des signaux de l'étape 2 est confirmée en réel.
 - mlx-serve non mesuré : 107 Go nécessaires, 43,8 Go disponibles.
+
+## Radar — 9 octobre 2026
+
+`lml radar --refresh` en 3,3 s : tendances MLX, nouveautés de 6 auteurs (30 jours), 19 modèles parmi les 33 liens Hugging Face de Spicilege. 19 modèles retenus, 91 écartés : 44 hors des 40 premiers candidats examinés, 17 pas au format MLX, 8 d'extraction de caractéristiques, 4 déjà sur ce Mac, 3 audio, 3 synthèse vocale… Aucun modèle d'image, de vidéo ou d'audio retenu ; le plus gros fait 95,2 Go pour 120 Go utilisables.
+
+Extrait :
+
+| Modèle | Taille | Moteur probable | Raisons |
+|---|---|---|---|
+| orcarouter/Qwen3.8-27B-Uncensored-MLX | 94,6 Go | oMLX ou mlx-serve | Tendance · même base que le 27B MTPLX présent · ⚠︎ plusieurs variantes dans le dépôt |
+| Jundot/clef-oQ4e | 17 Go | oMLX | Tendance · nouveau chez Jundot (2 jours) · même base (Cloudflare/clef) que mlx-community/clef-4bit |
+| Youssofal/Ternary-Bonsai-2-27B-MTPLX-Optimized-Speed | 8,8 Go | MTPLX | Tendance · nouveau chez Youssofal · même base (Qwen/Qwen3.8-27B) que le 27B MTPLX présent |
+| ddalcu/Qwen3.8-Flash-Next-MLX-Serve-iQ-MLX-4.7bpw | 75,3 Go | mlx-serve | Tendance · nouveau chez ddalcu (7 jours) |
+| JANGQ-AI/MiniMax-M2.7-JANG_3L | 95,2 Go | oMLX ou mlx-serve | Favori Spicilege du 12 avr. 2026 |
+
+Au premier passage, la tête de liste (`mohit67890/imajev-4b`, 981 Mo) était un adaptateur LoRA de Qwen3.5-4B, inutilisable seul : les adaptateurs sont désormais écartés, et les dépôts à plusieurs variantes signalés (leur taille est la somme, et `hf download` les prend toutes). Moteurs attribués d'après l'auteur et le nom (« probable »). Non vérifié : un téléchargement réel, et le moment où oMLX découvre un modèle arrivé dans le cache Hugging Face.

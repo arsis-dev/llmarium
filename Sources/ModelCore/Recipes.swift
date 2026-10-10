@@ -241,8 +241,7 @@ public enum ClaudeAsk {
     }
 
     /// `mtplx tune` for one model, in a window the user watches: it loads the model and runs for minutes.
-    public static func mtplxTune(model: LocalModel) -> HarnessLaunch {
-        HarnessLaunch(kind: .claudeCode, arguments: ["mtplx", "tune", "--model", model.name], environment: [:],
-                      directory: FileManager.default.homeDirectoryForCurrentUser.path, appToOpen: nil, writtenFiles: [])
+    public static func mtplxTune(model: LocalModel) -> TerminalCommand {
+        TerminalCommand(arguments: ["mtplx", "tune", "--model", model.name], directory: FileManager.default.homeDirectoryForCurrentUser.path)
     }
 }

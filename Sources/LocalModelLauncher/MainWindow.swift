@@ -20,6 +20,7 @@ struct MainWindowView: View {
                     case .models: ModelsView(snapshot: snapshot)
                     case .proxy: ProxyView(snapshot: snapshot)
                     case .recipes: RecipesView(snapshot: snapshot)
+                    case .radar: RadarView(snapshot: snapshot)
                     case .disk: DiskView(snapshot: snapshot)
                     case .memory: MemoryView(snapshot: snapshot)
                     }

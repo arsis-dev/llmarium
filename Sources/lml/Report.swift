@@ -138,6 +138,25 @@ enum Report {
         return lines.joined(separator: "\n")
     }
 
+    static func radar(_ report: RadarReport, all: Bool) -> String {
+        var lines = ["Radar du \(report.fetchedAt.formatted(date: .abbreviated, time: .shortened))"]
+        lines += report.sources.map { "  · \($0)" }
+        lines.append("")
+        if report.items.isEmpty { lines.append("Aucun modèle retenu.") }
+        for item in report.items {
+            let size = item.sizeBytes.map(Format.bytes) ?? "taille ?"
+            let engines = item.engines.map(\.title).joined(separator: " ou ")
+            lines.append("\(item.id)  \(size) · \(engines) (probable)\(item.createdAt.map { " · \($0.formatted(date: .abbreviated, time: .omitted))" } ?? "")")
+            lines.append("    " + item.reasons.joined(separator: " · "))
+            for warning in item.warnings { lines.append("    ⚠︎ \(warning)") }
+        }
+        let counts = Dictionary(grouping: report.excluded, by: \.reason).mapValues(\.count).sorted { $0.value > $1.value }
+        lines.append("")
+        lines.append("Écartés : \(report.excluded.count) — " + counts.prefix(6).map { "\($0.key) (\($0.value))" }.joined(separator: " ; "))
+        if all { lines += report.excluded.map { "  \($0.id) : \($0.reason)" } }
+        return lines.joined(separator: "\n")
+    }
+
     static func memorySummary(_ stats: MemoryStats, omlx: OMLXState?) -> String {
         "Mémoire : \(Format.memory(stats.usedBytes)) utilisés sur \(Format.memory(stats.totalBytes)), pression \(stats.pressure.title.lowercased()), marge macOS \(stats.freePercent.map { "\($0) %" } ?? "—") (mémoire inactive comprise)"
     }

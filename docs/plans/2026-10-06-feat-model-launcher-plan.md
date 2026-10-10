@@ -159,7 +159,9 @@ Livré : recettes à trois niveaux de provenance (valeurs du fichier, pièges co
 
 **Terminé quand** trois profils de moteurs différents ont des benchmarks comparables dans une même vue.
 
-### Étape 6 — Radar des modèles
+### Étape 6 — Radar des modèles — livrée le 9 octobre 2026
+
+Deux passes sur l'API publique de Hugging Face (liste, puis fiche détaillée avec la taille réelle des fichiers pour au plus 40 candidats ; la taille déduite de `safetensors` est fausse pour les modèles quantifiés), favoris Spicilege lus en lecture seule (adresses et dates seulement, chemin donné par `desktop.json`), modèles de base lus dans les `README.md` locaux. Filtres en fonction pure, avec une raison pour chaque exclusion. Téléchargement réservé à l'utilisateur (app ou CLI), après contrôle du disque ; aucun outil MCP ne télécharge. Aucun téléchargement n'a été fait pendant la mise au point.
 
 - API Hugging Face filtrée : tâche texte ou image-texte, format MLX pour les moteurs V1, taille compatible avec la mémoire, auteurs suivis (mlx-community, unsloth, Youssofal, Jundot, ddalcu…), nouvelle quantification d'un modèle déjà présent.
 - Liens Hugging Face mis en favori dans Spicilege.
