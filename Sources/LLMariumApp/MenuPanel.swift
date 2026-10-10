@@ -8,7 +8,7 @@ struct MenuPanel: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
             HStack {
-                Text("Modèles locaux").font(.system(.title3, design: .serif).weight(.semibold))
+                Text("LLMarium").font(.system(.title3, design: .serif).weight(.semibold))
                 Spacer()
                 if model.isScanning { ProgressView().controlSize(.small) }
             }

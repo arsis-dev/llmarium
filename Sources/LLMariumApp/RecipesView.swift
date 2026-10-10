@@ -101,7 +101,7 @@ struct RecipesView: View {
     private func save() {
         guard var recipe = draft else { return }
         recipe.author = .user
-        recipe.sources.append("Modifiée dans Modèles locaux le \(Date().formatted(date: .abbreviated, time: .omitted))")
+        recipe.sources.append("Modifiée dans LLMarium le \(Date().formatted(date: .abbreviated, time: .omitted))")
         do {
             try RecipeStore.shared.save(recipe)
             draft = recipe
@@ -112,9 +112,9 @@ struct RecipesView: View {
     }
 
     private func ask(_ pairing: Pairing) {
-        let lml = Bundle.main.bundleURL.appending(path: "Contents/MacOS/lml").path
+        let llmarium = Bundle.main.bundleURL.appending(path: "Contents/MacOS/llmarium").path
         do {
-            try HarnessOpener.open(ClaudeAsk.launch(model: pairing.model, engine: pairing.engine, lml: lml))
+            try HarnessOpener.open(ClaudeAsk.launch(model: pairing.model, engine: pairing.engine, llmarium: llmarium))
             message = "Claude Code est ouvert dans Ghostty. La recette apparaîtra ici une fois enregistrée (rouvrez la section)."
         } catch {
             message = "\(error)"
@@ -173,7 +173,7 @@ struct BenchmarksSection: View {
     var body: some View {
         SwiftUI.Section {
             if results.isEmpty {
-                Text("Aucune mesure. « Mesurer » sur une carte de la section En cours, ou lml bench <modèle>.").foregroundStyle(.secondary)
+                Text("Aucune mesure. « Mesurer » sur une carte de la section En cours, ou llmarium bench <modèle>.").foregroundStyle(.secondary)
             } else {
                 Grid(alignment: .trailing, horizontalSpacing: 14, verticalSpacing: 6) {
                     GridRow {

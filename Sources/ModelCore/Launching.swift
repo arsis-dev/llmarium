@@ -66,7 +66,16 @@ public final class LaunchRegistry: @unchecked Sendable {
 }
 
 public enum AppPaths {
-    public static let support = FileManager.default.homeDirectoryForCurrentUser.appending(path: "Library/Application Support/LocalModelLauncher")
+    public static let support: URL = {
+        let base = FileManager.default.homeDirectoryForCurrentUser.appending(path: "Library/Application Support")
+        let current = base.appending(path: "LLMarium")
+        // Data written before the app was named LLMarium moves once, for the app and the CLI alike.
+        let legacy = base.appending(path: "LocalModelLauncher")
+        if !FileManager.default.fileExists(atPath: current.path), FileManager.default.fileExists(atPath: legacy.path) {
+            try? FileManager.default.moveItem(at: legacy, to: current)
+        }
+        return current
+    }()
     public static let logs = support.appending(path: "Logs")
 }
 
@@ -148,7 +157,7 @@ public enum ModelLauncher {
         }
     }
 
-    /// Starts the server in its own session (a Ctrl-C in the terminal that ran `lml start` does not reach it),
+    /// Starts the server in its own session (a Ctrl-C in the terminal that ran `llmarium start` does not reach it),
     /// logs to a file, waits until it serves, and records it as launched by this app.
     public static func start(_ plan: LaunchPlan, model: LocalModel, registry: LaunchRegistry = .shared,
                              timeout: TimeInterval = 900) async -> StartResult {

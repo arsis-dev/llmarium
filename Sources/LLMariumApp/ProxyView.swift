@@ -104,7 +104,7 @@ struct ProxyView: View {
                             .buttonStyle(.borderless).help("Copier")
                     }
                 }
-                Toggle("Ouvrir Modèles locaux à la connexion", isOn: Binding(get: { openAtLogin }, set: setOpenAtLogin))
+                Toggle("Ouvrir LLMarium à la connexion", isOn: Binding(get: { openAtLogin }, set: setOpenAtLogin))
             } header: {
                 Text("Point d'entrée")
             } footer: {
@@ -159,7 +159,7 @@ struct ProxyView: View {
             } header: {
                 Text("Harness")
             } footer: {
-                Text("Inscrit tous les modèles joignables dans Pi et DeepSeek Harness avec l'adresse du point d'entrée (une entrée « local-launcher », sauvegarde avant écriture). « Ouvrir dans… » passe aussi par le point d'entrée quand il est actif.")
+                Text("Inscrit tous les modèles joignables dans Pi et DeepSeek Harness avec l'adresse du point d'entrée (une entrée « llmarium », sauvegarde avant écriture). « Ouvrir dans… » passe aussi par le point d'entrée quand il est actif.")
             }
 
             SwiftUI.Section("Dernières requêtes") {

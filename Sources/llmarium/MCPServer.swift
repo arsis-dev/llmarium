@@ -145,7 +145,7 @@ struct MCPServer {
             return Pending(message: "Mesure de \(target.modelID) en cours ; le résultat apparaîtra dans list_benchmarks.")
         },
         Tool(name: "get_radar",
-             description: "Nouveaux modèles de langage au format MLX qui tiennent dans la mémoire de ce Mac et n'y sont pas encore : tendances Hugging Face, nouveautés des auteurs suivis, favoris Spicilege, autres versions des modèles présents. Chaque modèle donne ses raisons ; les modèles écartés aussi. Liste du jour (mise en cache 24 h). Lecture seule : le téléchargement se fait dans l'app ou avec lml radar download.",
+             description: "Nouveaux modèles de langage au format MLX qui tiennent dans la mémoire de ce Mac et n'y sont pas encore : tendances Hugging Face, nouveautés des auteurs suivis, favoris Spicilege, autres versions des modèles présents. Chaque modèle donne ses raisons ; les modèles écartés aussi. Liste du jour (mise en cache 24 h). Lecture seule : le téléchargement se fait dans l'app ou avec llmarium radar download.",
              properties: ["refresh": ["type": "boolean", "description": "Forcer une nouvelle recherche."]]) { arguments in
             await Radar.report(snapshot: await Inventory.take(), refresh: arguments["refresh"] as? Bool ?? false)
         },
@@ -276,7 +276,7 @@ struct MCPServer {
             send(result: [
                 "protocolVersion": requested ?? Self.protocolVersion,
                 "capabilities": ["tools": ["listChanged": false]],
-                "serverInfo": ["name": "local-model-launcher", "version": "0.1.0"],
+                "serverInfo": ["name": "llmarium", "version": "0.1.0"],
                 "instructions": "Moteurs et modèles locaux de ce Mac. Tous les outils sont en lecture seule sauf start_model, qui charge un modèle après un contrôle de mémoire, et open_in_harness, qui ouvre un harness pour l'utilisateur. Aucun outil n'arrête, ne décharge ni ne supprime : cela se fait dans l'app, après confirmation."
             ], id: id)
         case "ping":

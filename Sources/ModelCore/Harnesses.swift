@@ -34,9 +34,9 @@ public enum HarnessKind: String, Codable, CaseIterable, Sendable, Identifiable {
         switch self {
         case .claudeCode: "Variables d'environnement de la fenêtre seulement ; aucun fichier modifié."
         case .codex: "Dossier Codex propre à l'app (CODEX_HOME) : vos réglages, skills et MCP habituels ne sont pas chargés, ce qui allège fortement le prompt."
-        case .pi: "Une entrée « local-launcher » dans ~/.pi/agent/models.json (sauvegarde avant écriture) ; les autres fournisseurs restent intacts."
+        case .pi: "Une entrée « llmarium » dans ~/.pi/agent/models.json (sauvegarde avant écriture) ; les autres fournisseurs restent intacts."
         case .opencode: "Configuration passée à la fenêtre (OPENCODE_CONFIG_CONTENT, serveur privé) ; opencode.json n'est pas modifié."
-        case .deepseekHarness: "Un fournisseur « local-launcher » dans la couche de patch du profil desktop (sauvegarde avant écriture) ; le reste du fichier est conservé."
+        case .deepseekHarness: "Un fournisseur « llmarium » dans la couche de patch du profil desktop (sauvegarde avant écriture) ; le reste du fichier est conservé."
         }
     }
 }
@@ -109,8 +109,10 @@ public enum HarnessError: Error, CustomStringConvertible, Equatable {
 }
 
 public enum HarnessPlanner {
-    public static let providerID = "local-launcher"
-    static let apiKeyVariable = "LOCAL_LAUNCHER_API_KEY"
+    public static let providerID = "llmarium"
+    /// The id written before the app was named LLMarium; its entries are replaced, not left behind.
+    static let legacyProviderID = "local-launcher"
+    static let apiKeyVariable = "LLMARIUM_API_KEY"
     static let placeholderKey = "local"
 
     /// Why a harness cannot be used with this target, or nil.
@@ -199,13 +201,13 @@ public enum HarnessPlanner {
     /// Codex's whole configuration in the app's own CODEX_HOME. Hosted web search is off: local engines refuse it.
     static func codexConfig(_ target: HarnessTarget) -> String {
         var lines = [
-            "# Écrit par Modèles locaux à chaque ouverture : ne pas modifier.",
+            "# Écrit par LLMarium à chaque ouverture : ne pas modifier.",
             "model = \(tomlString(target.modelID))",
             "model_provider = \"\(providerID)\"",
             "web_search = \"disabled\""
         ]
         if let context = target.contextWindow { lines.append("model_context_window = \(context)") }
-        lines += ["", "[model_providers.\(providerID)]", "name = \"Modèles locaux\"",
+        lines += ["", "[model_providers.\(providerID)]", "name = \"LLMarium\"",
                   "base_url = \(tomlString(target.openAIBaseURL))", "env_key = \"\(apiKeyVariable)\"", "wire_api = \"responses\"", ""]
         return lines.joined(separator: "\n")
     }
@@ -220,7 +222,7 @@ public enum HarnessPlanner {
         let config: [String: Any] = [
             "provider": [providerID: [
                 "npm": "@ai-sdk/openai-compatible",
-                "name": "Modèles locaux",
+                "name": "LLMarium",
                 "options": ["baseURL": target.openAIBaseURL, "apiKey": placeholderKey, "timeout": false],
                 "models": [target.modelID: model]
             ]],
@@ -257,13 +259,15 @@ public enum HarnessPlanner {
             }
             return model
         }
+        providers.removeValue(forKey: legacyProviderID)
         providers[providerID] = ["api": "openai-completions", "baseUrl": baseURL + "/v1", "apiKey": placeholderKey,
                                  "compat": compat, "models": entries]
         root["providers"] = providers
         return try JSONSerialization.data(withJSONObject: root, options: [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes])
     }
 
-    static let dshMarker = "# Fournisseur géré par Modèles locaux : réécrit à chaque ouverture."
+    static let dshMarker = "# Fournisseur géré par LLMarium : réécrit à chaque ouverture."
+    static let legacyDshMarker = "# Fournisseur géré par Modèles locaux : réécrit à chaque ouverture."
 
     static func dshPatch(existing: String?, target: HarnessTarget) throws -> String {
         try dshPatch(existing: existing, baseURL: target.baseURL, models: [HarnessModel(target)])
@@ -273,7 +277,7 @@ public enum HarnessPlanner {
     static func dshPatch(existing: String?, baseURL: String, models: [HarnessModel]) throws -> String {
         func block(indent: Int) -> [String] {
             let pad = String(repeating: " ", count: indent)
-            var lines = ["\(pad)\(dshMarker)", "\(pad)\(providerID):", "\(pad)  displayName: Modèles locaux",
+            var lines = ["\(pad)\(dshMarker)", "\(pad)\(providerID):", "\(pad)  displayName: LLMarium",
                          "\(pad)  api: openai-completions", "\(pad)  baseURL: \(yamlString(baseURL + "/v1"))",
                          "\(pad)  apiKeyEnv: \(apiKeyVariable)", "\(pad)  models:"]
             for model in models {
@@ -300,13 +304,15 @@ public enum HarnessPlanner {
         }
         let providersIndent = indentation(lines[providers])
         let keyIndent = providersIndent + 2
-        let providersEnd = lines[(providers + 1)..<end].firstIndex { !$0.trimmingCharacters(in: .whitespaces).isEmpty && indentation($0) <= providersIndent } ?? end
-        // Remove our previous block: its marker, its key and every deeper line under the key.
-        if let key = lines[(providers + 1)..<providersEnd].firstIndex(where: { $0 == String(repeating: " ", count: keyIndent) + "\(providerID):" }) {
+        var providersEnd = lines[(providers + 1)..<end].firstIndex { !$0.trimmingCharacters(in: .whitespaces).isEmpty && indentation($0) <= providersIndent } ?? end
+        // Remove our previous blocks, current and legacy: marker, key and every deeper line under the key.
+        for id in [providerID, legacyProviderID] {
+            guard let key = lines[(providers + 1)..<providersEnd].firstIndex(where: { $0 == String(repeating: " ", count: keyIndent) + "\(id):" }) else { continue }
             var from = key
-            if from > providers + 1, lines[from - 1].trimmingCharacters(in: .whitespaces) == dshMarker { from -= 1 }
+            if from > providers + 1, [dshMarker, legacyDshMarker].contains(lines[from - 1].trimmingCharacters(in: .whitespaces)) { from -= 1 }
             let to = lines[(key + 1)..<providersEnd].firstIndex { !$0.trimmingCharacters(in: .whitespaces).isEmpty && indentation($0) <= keyIndent } ?? providersEnd
             lines.removeSubrange(from..<to)
+            providersEnd -= to - from
         }
         lines.insert(contentsOf: block(indent: keyIndent), at: providers + 1)
         return lines.joined(separator: "\n") + "\n"
@@ -323,7 +329,7 @@ public enum HarnessPlanner {
         try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
         if backup {
             let stamp = ISO8601DateFormatter().string(from: Date()).replacingOccurrences(of: ":", with: "-")
-            let copy = url.deletingLastPathComponent().appending(path: "\(url.lastPathComponent).bak-local-launcher-\(stamp)")
+            let copy = url.deletingLastPathComponent().appending(path: "\(url.lastPathComponent).bak-llmarium-\(stamp)")
             try? FileManager.default.copyItem(at: url, to: copy)
         }
         try data.write(to: url, options: .atomic)

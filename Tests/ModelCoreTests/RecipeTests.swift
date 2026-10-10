@@ -91,15 +91,15 @@ final class BenchmarkPromptTests: XCTestCase {
 final class ClaudeAskTests: XCTestCase {
     func testMCPConfigIsValidJSONAndThePromptNamesTheTools() throws {
         let model = LocalModel(name: "Youssofal/Qwen3.5-4B", store: .mtplx, path: "/x")
-        let launch = ClaudeAsk.launch(model: model, engine: .mtplx, lml: #"/Applications/Modèles "locaux".app/Contents/MacOS/lml"#)
+        let launch = ClaudeAsk.launch(model: model, engine: .mtplx, llmarium: #"/Applications/Modèles "locaux".app/Contents/MacOS/llmarium"#)
         let index = try XCTUnwrap(launch.arguments.firstIndex(of: "--mcp-config"))
         let config = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(launch.arguments[index + 1].utf8)) as? [String: Any])
-        let server = try XCTUnwrap((config["mcpServers"] as? [String: Any])?["local-models"] as? [String: Any])
-        XCTAssertEqual(server["command"] as? String, #"/Applications/Modèles "locaux".app/Contents/MacOS/lml"#)
+        let server = try XCTUnwrap((config["mcpServers"] as? [String: Any])?["llmarium"] as? [String: Any])
+        XCTAssertEqual(server["command"] as? String, #"/Applications/Modèles "locaux".app/Contents/MacOS/llmarium"#)
         XCTAssertEqual(server["args"] as? [String], ["mcp"])
         let prompt = try XCTUnwrap(launch.arguments.last)
         XCTAssertTrue(prompt.contains("get_model_context") && prompt.contains("save_recipe") && prompt.contains("Youssofal/Qwen3.5-4B"))
         XCTAssertEqual(launch.arguments[launch.arguments.count - 2], "--", "the prompt cannot be read as an option")
-        XCTAssertFalse(launch.arguments.contains("mcp__local-models__save_recipe"), "saving is never pre-approved")
+        XCTAssertFalse(launch.arguments.contains("mcp__llmarium__save_recipe"), "saving is never pre-approved")
     }
 }

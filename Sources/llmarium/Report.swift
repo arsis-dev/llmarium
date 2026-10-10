@@ -124,7 +124,7 @@ enum Report {
     }
 
     static func benchmarks(_ results: [BenchmarkResult]) -> String {
-        guard !results.isEmpty else { return "Aucune mesure. Lancez lml bench <modèle> sur un modèle en mémoire." }
+        guard !results.isEmpty else { return "Aucune mesure. Lancez llmarium bench <modèle> sur un modèle en mémoire." }
         var lines = ["\(pad("modèle", 44)) \(pad("moteur", 10)) \(pad("génér.", 8)) \(pad("lecture", 8)) \(pad("1er tok", 8))  outil  long  pensée  mémoire"]
         for result in results {
             let decode = result.decodeTokensPerSecond.map { String(format: "%.1f", $0) } ?? "—"

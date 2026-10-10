@@ -41,7 +41,7 @@ final class RouteTableTests: XCTestCase {
         guard case .upstream(let messages) = table().resolve(model: "deepseek-v4-pro", path: "/v1/messages") else { return XCTFail() }
         XCTAssertEqual(messages.path, "/anthropic/v1/messages")
         XCTAssertEqual(table().resolve(model: "cline/x", path: "/v1/messages"),
-                       .notFound("« cline/x » n'est servi par aucun moteur en cours ni fournisseur distant. Lancez-le dans Modèles locaux ou avec : lml start cline/x"),
+                       .notFound("« cline/x » n'est servi par aucun moteur en cours ni fournisseur distant. Lancez-le dans LLMarium ou avec : llmarium start cline/x"),
                        "no Anthropic root for Cline: no route rather than a wrong one")
     }
 

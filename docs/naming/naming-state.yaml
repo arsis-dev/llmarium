@@ -1,0 +1,74 @@
+project: local-model-launcher
+profile: oss
+brief:
+  promise: "Le lieu où vivent tes modèles locaux, inventoriés et prêts à servir."
+  taste_liked: [Appothèque, Spicilège, Herbier, Feuillet, Carnet]
+  taste_disliked: []
+  register: les deux rails (évocatif et inventé)
+  constraints:
+    - lisible en anglais
+    - court pour une CLI (4 à 8 lettres)
+    - même famille qu'Appothèque, sans calque en -thèque
+waves:
+  - n: 1
+    date: 2026-10-10
+    fields: [écurie et attelage (harness), réserve savante latine, vivant gardé prêt, relais romain (inattendu)]
+    shown: [Vivier, Mansio, Stabulum, Equile, Penates, Capsa, Theca, Armarium, Scrinium, Remise, Stalle, Sellerie, Attelage, Statio, Logis, Logeo, Logea, Stabla]
+    eliminated_collision:
+      - {name: Paddock, reason: "gestionnaire de LLM locaux pour Mac déjà existant"}
+      - {name: Remuda, reason: "outil d'inférence LLM avec la même métaphore équestre"}
+      - {name: Relais, reason: "trop proche de Relay, proxy LLM pour Claude Code et Codex"}
+      - {name: Mutatio, reason: "Mutatio.dev, outil de refactoring IA"}
+      - {name: Loci, reason: "Loci AI, app d'IA locale sur Mac et iOS"}
+      - {name: Lares, reason: "bundle d'agents IA locaux pour KDE nommé d'après les Lares"}
+      - {name: Alveo, reason: "cartes accélératrices AMD Alveo (calcul IA)"}
+      - {name: Cella, reason: "trop proche de Cellar, serveur MCP macOS"}
+      - {name: Hangar, reason: "pris partout, générique"}
+      - {name: Capsula, reason: "pris sur tous les registres"}
+      - {name: Arca, reason: "pris sur tous les registres et domaines"}
+      - {name: Mews, reason: "pris sur PyPI, npm et crates"}
+    kept: [{name: Theca, reason: "aimé ; demande une série plus explicite autour"}]
+    maybe: []
+    rejected: []
+  - n: 2
+    date: 2026-10-10
+    fields: [Theca + mot qui dit modèles, IA ou local]
+    shown: [Theca, Modeltheca, Modelotheca, Logitheca, Tensortheca, Paramtheca, Infertheca, Localtheca, Mlxtheca, Lmtheca, Tokentheca, Synaptheca, Cognitheca, Machinatheca, Vectheca, Neuratheca]
+    eliminated_collision:
+      - {name: Neurotheca, reason: "trop proche de neurothekeoma (tumeur cutanée)"}
+      - {name: Theka, reason: "pris partout"}
+    kept: []
+    maybe: []
+    rejected: []
+  - n: 3
+    date: 2026-10-10
+    note: "la vague 2 déclinait trop Theca ; l'utilisateur veut une série explicite avec LLM ou AI ; LLMarium retenu au final"
+    fields: [lieu de rangement + LLM, lieu de rangement + Model]
+    shown: [LLMarium, LLM Loft, LLM Cellar, LLM Lodge, LLM Stable, LLM Stall, LLM House, LLM Yard, LLM Depot, LLM Bay, LLM Nest, LLM Den, LLM Cove, LLM Hangar, ModelBay, ModelDen]
+    eliminated_collision:
+      - {name: LLM Hive, reason: "PyPI llmhive pris ; Hive, gestionnaire de modèles GGUF"}
+      - {name: LLMbox, reason: "pris partout"}
+      - {name: LLMvault, reason: "pris sur PyPI, npm et .com"}
+      - {name: "AI Shelf, AI Garage, AI Loft, AI Cove", reason: ".com et GitHub pris ; « AI » se lit mal en français (IA)"}
+    kept: []
+    maybe: []
+    rejected: []
+  - n: 4
+    date: 2026-10-10
+    note: "vague 3 jugée trop littérale (LLM + lieu) ; l'utilisateur veut plus subtil"
+    fields: [mot de rangement qui contient « lm » ou « llm », mot de lieu qui contient « ai »]
+    shown: [Almarium, Almery, Almoire, Allmend, Chais, Quai, Remaise, Pailler, Aiguillage, Baie, Lair]
+    eliminated_collision:
+      - {name: Haiven, reason: "HaiVE, assistant IA ; Haiven de Thoughtworks"}
+      - {name: Helm, reason: "Helm, gestionnaire de paquets Kubernetes"}
+      - {name: Aisle, reason: "pris partout, peu évocateur"}
+      - {name: Cairn, reason: "pris partout, nombreux logiciels"}
+    kept: []
+    maybe: []
+    rejected: []
+learned_preferences:
+  - "aime Theca malgré sa proximité avec -thèque : la contrainte « sans calque » est levée"
+  - "rejette le littéral « LLM + lieu » : veut une allusion à l'IA, pas un sigle plaqué"
+  - "veut un nom plus explicite sur ce que l'app contient (des modèles)"
+finalists: [LLMarium, Almarium, LLM Cellar, LLM Loft]
+decision: {name: LLMarium, date: 2026-10-10, report: docs/naming/llmarium-naming-report.md}

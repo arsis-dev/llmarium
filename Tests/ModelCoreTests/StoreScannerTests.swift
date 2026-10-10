@@ -6,7 +6,7 @@ final class StoreScannerTests: XCTestCase {
     private var root: URL!
 
     override func setUpWithError() throws {
-        root = FileManager.default.temporaryDirectory.appending(path: "lml-tests-\(UUID().uuidString)")
+        root = FileManager.default.temporaryDirectory.appending(path: "llmarium-tests-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
     }
 

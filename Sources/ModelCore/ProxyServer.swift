@@ -4,7 +4,7 @@ import Security
 
 /// API keys of remote providers, in the login Keychain. The proxy reads them when it forwards a request.
 public enum ProviderKeys {
-    static let service = "dev.arsis.localmodellauncher.provider"
+    static let service = "dev.arsis.llmarium.provider"
 
     public static func key(for provider: String) -> String? {
         let query: [String: Any] = [kSecClass as String: kSecClassGenericPassword, kSecAttrService as String: service,
@@ -27,7 +27,7 @@ public enum ProviderKeys {
         SecItemDelete(base as CFDictionary)
         var item = base
         item[kSecValueData as String] = Data(key.utf8)
-        item[kSecAttrLabel as String] = "Modèles locaux : clé \(provider)"
+        item[kSecAttrLabel as String] = "LLMarium : clé \(provider)"
         let status = SecItemAdd(item as CFDictionary, nil)
         guard status == errSecSuccess else { throw KeychainError(status: status) }
     }
@@ -51,7 +51,7 @@ public final class ProxyServer: @unchecked Sendable {
     public typealias Logger = @Sendable (String) -> Void
 
     public let port: Int
-    private let queue = DispatchQueue(label: "dev.arsis.localmodellauncher.proxy")
+    private let queue = DispatchQueue(label: "dev.arsis.llmarium.proxy")
     private var listeners: [NWListener] = []
     private let tableProvider: @Sendable () async -> RouteTable
     private let keyProvider: @Sendable (String) -> String?
@@ -223,7 +223,7 @@ final class ProxySession: @unchecked Sendable {
                 queue.async { self.reply(ProxyBody.response(status: 200, reason: "OK", body: list)) }
             }
         case ("GET", "/health"), ("GET", "/"):
-            reply(ProxyBody.response(status: 200, reason: "OK", body: Data(#"{"status":"ok","service":"Modèles locaux"}"#.utf8)))
+            reply(ProxyBody.response(status: 200, reason: "OK", body: Data(#"{"status":"ok","service":"LLMarium"}"#.utf8)))
         case ("POST", let path) where path.hasPrefix("/v1/"):
             guard let model = ProxyBody.model(in: body) else {
                 return reply(ProxyBody.error(status: 400, message: "Champ « model » absent du corps JSON."))
@@ -247,7 +247,7 @@ final class ProxySession: @unchecked Sendable {
             var authorization: [(String, String)] = []
             if let provider = upstream.providerID {
                 guard let key = server?.key(for: provider) else {
-                    return reply(ProxyBody.error(status: 503, message: "Clé absente pour « \(provider) » : ajoutez-la avec lml provider set-key \(provider)."))
+                    return reply(ProxyBody.error(status: 503, message: "Clé absente pour « \(provider) » : ajoutez-la avec llmarium provider set-key \(provider)."))
                 }
                 authorization = head.path.hasPrefix("/v1/messages") ? [("x-api-key", key)] : [("Authorization", "Bearer \(key)")]
             }
@@ -282,7 +282,7 @@ final class ProxySession: @unchecked Sendable {
                 once.run {
                     connection.cancel()
                     server?.logRequest("\(label) → injoignable (\(error.localizedDescription))")
-                    reply(ProxyBody.error(status: 502, message: "\(upstream.label) ne répond pas sur \(upstream.host):\(upstream.port). Moteur arrêté ? Relancez-le dans Modèles locaux ou avec lml start.", type: "upstream_unavailable"))
+                    reply(ProxyBody.error(status: 502, message: "\(upstream.label) ne répond pas sur \(upstream.host):\(upstream.port). Moteur arrêté ? Relancez-le dans LLMarium ou avec llmarium start.", type: "upstream_unavailable"))
                 }
             default:
                 break

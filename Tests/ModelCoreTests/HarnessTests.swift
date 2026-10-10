@@ -44,7 +44,7 @@ final class HarnessTests: XCTestCase {
         let twice = try HarnessPlanner.dshPatch(existing: once, target: target)
         XCTAssertEqual(once, twice, "opening again rewrites the same block, nothing more")
         var updated = once.components(separatedBy: "\n")
-        let marker = try XCTUnwrap(updated.firstIndex { $0.contains("géré par Modèles locaux") })
+        let marker = try XCTUnwrap(updated.firstIndex { $0.contains("géré par LLMarium") })
         let blockEnd = try XCTUnwrap(updated[marker...].firstIndex { $0.trimmingCharacters(in: .whitespaces) == "- text" })
         XCTAssertTrue(updated[marker...blockEnd].allSatisfy { $0.hasPrefix("      ") }, "the whole block sits inside providers")
         var withoutBlock = updated
@@ -52,7 +52,7 @@ final class HarnessTests: XCTestCase {
         XCTAssertEqual(withoutBlock.joined(separator: "\n"), Self.realPatch, "every other line is kept as it was")
         updated = once.components(separatedBy: "\n")
         let providers = try XCTUnwrap(updated.firstIndex(of: "    providers:"))
-        XCTAssertEqual(updated[providers + 2], "      local-launcher:")
+        XCTAssertEqual(updated[providers + 2], "      llmarium:")
         XCTAssertTrue(once.contains("      dwarfstar:\n        displayName: DwarfStar (local)"))
         XCTAssertTrue(once.contains("contextWindow: 262144"))
 
@@ -60,7 +60,7 @@ final class HarnessTests: XCTestCase {
         moved.baseURL = "http://127.0.0.1:18100"
         let switched = try HarnessPlanner.dshPatch(existing: once, target: moved)
         XCTAssertFalse(switched.contains("8020/v1\""))
-        XCTAssertEqual(switched.components(separatedBy: "local-launcher:").count, 2, "one block only")
+        XCTAssertEqual(switched.components(separatedBy: "llmarium:").count, 2, "one block only")
     }
 
     func testDSHPatchCreatesOrAppendsTheEntry() throws {
@@ -73,17 +73,32 @@ final class HarnessTests: XCTestCase {
     }
 
     func testPiKeepsOtherProvidersAndReplacesOurs() throws {
-        let existing = #"{"providers": {"mtplx": {"api": "openai-completions", "models": [{"id": "a"}]}, "local-launcher": {"old": true}}, "extra": 1}"#
+        let existing = #"{"providers": {"mtplx": {"api": "openai-completions", "models": [{"id": "a"}]}, "llmarium": {"old": true}}, "extra": 1}"#
         let data = try HarnessPlanner.piModels(existing: Data(existing.utf8), target: target)
         let root = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
         let providers = try XCTUnwrap(root["providers"] as? [String: Any])
         XCTAssertNotNil(providers["mtplx"])
-        let ours = try XCTUnwrap(providers["local-launcher"] as? [String: Any])
+        let ours = try XCTUnwrap(providers["llmarium"] as? [String: Any])
         XCTAssertNil(ours["old"])
         XCTAssertEqual(ours["baseUrl"] as? String, "http://127.0.0.1:8020/v1")
         XCTAssertEqual((ours["compat"] as? [String: Any])?["thinkingFormat"] as? String, "qwen")
         XCTAssertEqual(root["extra"] as? Int, 1)
         XCTAssertThrowsError(try HarnessPlanner.piModels(existing: Data("{oops".utf8), target: target))
+    }
+
+    func testLegacyEntriesFromBeforeTheRenameAreReplaced() throws {
+        let pi = #"{"providers": {"local-launcher": {"old": true}, "mtplx": {}}}"#
+        let piData = try HarnessPlanner.piModels(existing: Data(pi.utf8), target: target)
+        let providers = try XCTUnwrap((JSONSerialization.jsonObject(with: piData) as? [String: Any])?["providers"] as? [String: Any])
+        XCTAssertEqual(Set(providers.keys), ["llmarium", "mtplx"])
+
+        let legacy = try HarnessPlanner.dshPatch(existing: Self.realPatch, target: target)
+            .replacingOccurrences(of: HarnessPlanner.dshMarker, with: HarnessPlanner.legacyDshMarker)
+            .replacingOccurrences(of: "      llmarium:", with: "      local-launcher:")
+        let renamed = try HarnessPlanner.dshPatch(existing: legacy, target: target)
+        XCTAssertFalse(renamed.contains("local-launcher"))
+        XCTAssertFalse(renamed.contains("Modèles locaux"))
+        XCTAssertEqual(renamed, try HarnessPlanner.dshPatch(existing: Self.realPatch, target: target))
     }
 
     func testCodexConfigTurnsOffHostedSearch() {
@@ -96,7 +111,7 @@ final class HarnessTests: XCTestCase {
 
     func testOpenCodeConfigSelectsOurModel() throws {
         let object = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(HarnessPlanner.openCodeConfig(target).utf8)) as? [String: Any])
-        XCTAssertEqual(object["model"] as? String, "local-launcher/Qwen3.8-27B")
+        XCTAssertEqual(object["model"] as? String, "llmarium/Qwen3.8-27B")
     }
 
     func testClaudeCodeEnvironmentAndContextGate() throws {

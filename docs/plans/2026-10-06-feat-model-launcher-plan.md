@@ -169,6 +169,20 @@ Deux passes sur l'API publique de Hugging Face (liste, puis fiche détaillée av
 
 **Terminé quand** le radar présente une liste courte de modèles lançables sur ce Mac, sans modèles d'image ou de vidéo ni formats inutilisables.
 
+### Étape 7 — Idées reprises d'outils voisins — décidée le 10 octobre 2026
+
+Idées vues dans Paddock (MaximeDeconinck), LlamaBarn, local-llm et ModelHub, retenues par l'utilisateur parce qu'elles servent le but de l'app. Aucune copie de code : seulement les idées.
+
+- **Plafond mémoire du GPU** : lire `recommendedMaxWorkingSetSize` (Metal) et s'en servir dans le verdict « tient / ne tient pas », à côté du plafond d'oMLX.
+- **Vitesse estimée avant lancement** : estimation bornée par la bande passante mémoire de la puce et la taille des poids actifs (MoE compris), remplacée par la mesure dès qu'un banc d'essai existe. Affichée au lancement et dans le radar, toujours marquée « estimée » ou « mesurée ».
+- **Déchargement après inactivité, en option** : case à cocher au lancement pour MTPLX et mlx-serve (lancés par l'app) ; arrêt après N minutes sans requête, annoncé dans la vue des modèles en cours. oMLX garde sa propre gestion.
+- **Mise à la corbeille d'un modèle** depuis l'inventaire, avec confirmation : jamais de suppression définitive, refus si le modèle tourne, avertissement si des fichiers sont partagés avec un autre modèle (liens du cache Hugging Face).
+- **Radar classé par usage** : code, chat, raisonnement, vision, d'après les étiquettes et le nom du modèle, avec une pénalité pour les modèles anciens ; la raison du classement reste visible.
+
+Écarté le 10 octobre 2026 : petit modèle pour les tâches de fond de Claude Code, relance automatique, moteur maison, Ollama et llama.cpp, exposition réseau, catalogue manuel.
+
+**Terminé quand** le verdict mémoire cite le plafond GPU, une vitesse estimée apparaît pour un modèle jamais mesuré puis cède la place à la mesure, un serveur inactif s'arrête seul quand l'option est cochée, un modèle part à la corbeille après confirmation et le radar se filtre par usage.
+
 ## Risques
 
 - Les appels d'outils peuvent échouer sur un couple moteur × protocole malgré la route. L'étape 0 puis KTD8 le détectent tôt.
@@ -181,5 +195,5 @@ Deux passes sur l'API publique de Hugging Face (liste, puis fiche détaillée av
 
 ## Questions ouvertes (non bloquantes)
 
-- Nom de l'app et de la CLI.
+- Nom de l’app et de la CLI : réglé le 10 octobre 2026, LLMarium (app) et `llmarium` (CLI) ; voir `docs/naming/`.
 - Dépendance SwiftNIO ou Hummingbird pour la cible du proxy (KTD7).

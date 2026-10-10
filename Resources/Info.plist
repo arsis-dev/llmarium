@@ -1,11 +1,11 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0"><dict>
-    <key>CFBundleName</key><string>Modèles locaux</string>
-    <key>CFBundleDisplayName</key><string>Modèles locaux</string>
+    <key>CFBundleName</key><string>LLMarium</string>
+    <key>CFBundleDisplayName</key><string>LLMarium</string>
     <key>CFBundleDevelopmentRegion</key><string>fr</string>
-    <key>CFBundleIdentifier</key><string>dev.arsis.localmodellauncher</string>
-    <key>CFBundleExecutable</key><string>LocalModelLauncher</string>
+    <key>CFBundleIdentifier</key><string>dev.arsis.llmarium</string>
+    <key>CFBundleExecutable</key><string>LLMariumApp</string>
     <key>CFBundlePackageType</key><string>APPL</string>
     <key>CFBundleShortVersionString</key><string>0.1.0</string>
     <key>CFBundleVersion</key><string>1</string>
@@ -13,5 +13,5 @@
     <key>LSUIElement</key><true/>
     <key>NSHighResolutionCapable</key><true/>
     <key>NSPrincipalClass</key><string>NSApplication</string>
-    <key>NSAppleEventsUsageDescription</key><string>Modèles locaux ouvre une fenêtre Ghostty dans le dossier choisi pour y lancer le harness avec le modèle local.</string>
+    <key>NSAppleEventsUsageDescription</key><string>LLMarium ouvre une fenêtre Ghostty dans le dossier choisi pour y lancer le harness avec le modèle local.</string>
 </dict></plist>

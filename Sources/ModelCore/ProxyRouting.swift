@@ -141,7 +141,7 @@ public struct RouteTable: Sendable {
         }
         let hint = alias != nil ? "l'alias « \(requested) » vise « \(model) », qui n'est servi par aucun \(alias?.provider == nil ? "moteur local en cours" : "fournisseur joignable")"
                                              : "« \(requested) » n'est servi par aucun moteur en cours ni fournisseur distant"
-        return .notFound("\(hint). Lancez-le dans Modèles locaux ou avec : lml start \(model)")
+        return .notFound("\(hint). Lancez-le dans LLMarium ou avec : llmarium start \(model)")
     }
 
     /// `/v1/messages` goes to the Anthropic-compatible root, every other `/v1/…` route to the OpenAI-compatible one.

@@ -201,7 +201,7 @@ public enum Knowledge {
         case .mtplx:
             return [
                 ("Raisonnement actif par défaut : il consomme les tokens de sortie et peut laisser une réponse vide. « --reasoning off » pour les clients qui attendent du texte ou du JSON.",
-                 "Essai Modèles locaux du 8 oct. 2026"),
+                 "Essai LLMarium du 8 oct. 2026"),
                 ("MTPLX ignore « enable_thinking » envoyé dans la requête : seul le lancement décide.",
                  "Note de la configuration LiteLLM du 7 juil. 2026"),
                 ("« mtplx tune » mesure la profondeur MTP la plus rapide sur ce Mac (plusieurs minutes, charge le modèle).",
@@ -212,7 +212,7 @@ public enum Knowledge {
                 ("Réglages à appliquer dans l'app oMLX (Réglages du modèle → Optimal) ; omlx.ai liste les meilleurs résultats pour cette puce.",
                  "API d'administration d'oMLX 0.7.0"),
                 ("Son garde-fou mémoire refuse une requête ou décharge le modèle sous pression ; il ne mesure la taille réelle qu'une fois chargé.",
-                 "Essais Modèles locaux des 6 et 8 oct. 2026")
+                 "Essais LLMarium des 6 et 8 oct. 2026")
             ]
         case .mlxServe:
             return [
@@ -225,8 +225,8 @@ public enum Knowledge {
 /// « Demander à Claude » : a Claude Code session in Ghostty with only this app's MCP server, asked to research
 /// the best known settings, propose them with sources, and save the recipe once the user agrees.
 public enum ClaudeAsk {
-    public static func launch(model: LocalModel, engine: EngineKind, lml: String) -> HarnessLaunch {
-        let config = #"{"mcpServers":{"local-models":{"command":"\#(lml.replacingOccurrences(of: "\"", with: "\\\""))","args":["mcp"]}}}"#
+    public static func launch(model: LocalModel, engine: EngineKind, llmarium: String) -> HarnessLaunch {
+        let config = #"{"mcpServers":{"llmarium":{"command":"\#(llmarium.replacingOccurrences(of: "\"", with: "\\\""))","args":["mcp"]}}}"#
         let prompt = """
         Trouve la meilleure configuration connue pour le modèle « \(model.name) » sur le moteur \(engine.title), sur ce Mac.
         1. Appelle get_model_context (model: « \(model.name) », engine: « \(engine.rawValue) ») : machine, versions, architecture, valeurs du fichier, recette actuelle, mesures, pièges déjà constatés et, pour oMLX, les résultats publiés sur omlx.ai.
@@ -236,7 +236,7 @@ public enum ClaudeAsk {
         """
         return HarnessLaunch(kind: .claudeCode,
                              arguments: ["claude", "--mcp-config", config,
-                                         "--allowedTools", "mcp__local-models__get_model_context", "WebSearch", "WebFetch", "--", prompt],
+                                         "--allowedTools", "mcp__llmarium__get_model_context", "WebSearch", "WebFetch", "--", prompt],
                              environment: [:], directory: AppPaths.support.path, appToOpen: nil, writtenFiles: [])
     }
 

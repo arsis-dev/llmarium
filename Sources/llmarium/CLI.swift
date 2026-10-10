@@ -2,38 +2,38 @@ import Foundation
 import ModelCore
 
 @main
-struct LML {
+struct LLMariumCLI {
     static let usage = """
-    lml — moteurs et modèles locaux
+    llmarium — moteurs et modèles locaux
 
     Utilisation :
-      lml [status]          Moteurs, mémoire et disque en bref
-      lml running           Modèles en mémoire et qui les a lancés
-      lml models [--all]    Modèles présents (--all inclut embeddings, rerankers…)
-      lml disk              Emplacements, doublons probables, liens cassés, entrées vides
-      lml memory            Mémoire et plus gros consommateurs
-      lml estimate <modèle> [--engine omlx|mtplx|mlx-serve] [--context N]
+      llmarium [status]          Moteurs, mémoire et disque en bref
+      llmarium running           Modèles en mémoire et qui les a lancés
+      llmarium models [--all]    Modèles présents (--all inclut embeddings, rerankers…)
+      llmarium disk              Emplacements, doublons probables, liens cassés, entrées vides
+      llmarium memory            Mémoire et plus gros consommateurs
+      llmarium estimate <modèle> [--engine omlx|mtplx|mlx-serve] [--context N]
                             Mémoire nécessaire, disponible, et quoi libérer
-      lml start <modèle> [--engine …] [--context N] [--port N] [--force]
+      llmarium start <modèle> [--engine …] [--context N] [--port N] [--force]
                             Charge le modèle (refusé s'il ne tient pas, sauf --force)
-      lml open <harness> [--model …] [--dir dossier] [--headless "consigne"] [--dry-run]
+      llmarium open <harness> [--model …] [--dir dossier] [--headless "consigne"] [--dry-run]
                             Ouvre le modèle dans claude, codex, pi, opencode ou dsh
                             (fenêtre Ghostty ; --headless : une fois, sans interface)
-      lml proxy [--port N]  Point d'entrée local (OpenAI et Anthropic) vers les modèles en cours
-      lml proxy import-litellm <fichier>   Reprend les alias et fournisseurs d'une config LiteLLM
-      lml proxy port <N>                   Change le port du point d'entrée
-      lml provider list | set-key <id> | remove-key <id>   Fournisseurs distants et leurs clés
-      lml sync              Inscrit tous les modèles joignables dans Pi et DeepSeek Harness via le point d'entrée
-      lml recipe [list] | show <modèle> | remove <modèle> | set <modèle> [--context N] [--reasoning on|off|auto]
+      llmarium proxy [--port N]  Point d'entrée local (OpenAI et Anthropic) vers les modèles en cours
+      llmarium proxy import-litellm <fichier>   Reprend les alias et fournisseurs d'une config LiteLLM
+      llmarium proxy port <N>                   Change le port du point d'entrée
+      llmarium provider list | set-key <id> | remove-key <id>   Fournisseurs distants et leurs clés
+      llmarium sync              Inscrit tous les modèles joignables dans Pi et DeepSeek Harness via le point d'entrée
+      llmarium recipe [list] | show <modèle> | remove <modèle> | set <modèle> [--context N] [--reasoning on|off|auto]
                  [--temperature x] [--top-p x] [--top-k n] [--note "…"]
                             Recettes : réglages appliqués au lancement, sources et pièges connus
-      lml bench <modèle> | list
+      llmarium bench <modèle> | list
                             Banc d'essai d'un modèle en mémoire, ou comparaison des mesures
-      lml radar [--refresh] [--all]
+      llmarium radar [--refresh] [--all]
                             Nouveaux modèles lançables sur ce Mac, avec leurs raisons (--all : les exclus aussi)
-      lml radar download <owner/name> [--engine …] [--yes]
+      llmarium radar download <owner/name> [--engine …] [--yes]
                             Télécharge un modèle après contrôle de l'espace disque
-      lml mcp               Serveur MCP sur stdio
+      llmarium mcp               Serveur MCP sur stdio
     Option : --json pour une sortie JSON.
     L'arrêt et le déchargement se font dans l'app, après confirmation.
     """
@@ -69,7 +69,7 @@ struct LML {
                 }
             }
         case "estimate", "start":
-            guard let query = options.positional.dropFirst().first else { fail("Précisez un modèle : lml \(command) <modèle>") }
+            guard let query = options.positional.dropFirst().first else { fail("Précisez un modèle : llmarium \(command) <modèle>") }
             let snapshot = await Inventory.take()
             let model: LocalModel
             switch ModelResolver.find(query, in: snapshot.models) {
@@ -127,7 +127,7 @@ struct LML {
                 target = targets.first { $0.modelID.localizedCaseInsensitiveContains(query) || query.localizedCaseInsensitiveContains($0.modelID) }
             }
             guard let target else {
-                fail(targets.isEmpty ? "Aucun modèle en cours : lancez-en un (lml start …) ou précisez --model."
+                fail(targets.isEmpty ? "Aucun modèle en cours : lancez-en un (llmarium start …) ou précisez --model."
                                      : "Modèles en cours : \(targets.map(\.modelID).joined(separator: ", ")).")
             }
             if let reason = HarnessPlanner.unavailableReason(kind, target: target, installed: HarnessInstallations.detect()) { fail(reason) }
@@ -159,7 +159,7 @@ struct LML {
             }
         case "proxy" where options.positional.dropFirst().first == "port":
             guard let port = options.positional.dropFirst(2).first.flatMap(Int.init), (1024...65_535).contains(port) else {
-                fail("lml proxy port <1024-65535>")
+                fail("llmarium proxy port <1024-65535>")
             }
             var config = ProxyConfig.load()
             config.port = port
@@ -167,7 +167,7 @@ struct LML {
             print("Port du point d'entrée : \(port). Redémarrez-le (interrupteur dans l'app) pour l'appliquer.")
         case "proxy" where options.positional.dropFirst().first == "import-litellm":
             guard let path = options.positional.dropFirst(2).first.map({ ($0 as NSString).expandingTildeInPath }),
-                  let yaml = try? String(contentsOfFile: path, encoding: .utf8) else { fail("Précisez le fichier : lml proxy import-litellm <litellm-config.yaml>") }
+                  let yaml = try? String(contentsOfFile: path, encoding: .utf8) else { fail("Précisez le fichier : llmarium proxy import-litellm <litellm-config.yaml>") }
             let imported = LiteLLMImport.parse(yaml)
             let merged = LiteLLMImport.merge(imported, into: ProxyConfig.load())
             do { try merged.save() } catch { fail("Écriture impossible : \(error)") }
@@ -175,14 +175,14 @@ struct LML {
             print("Fournisseurs : " + imported.providers.map { "\($0.id) (\($0.prefix.map { "\($0)*" } ?? $0.models.joined(separator: ", ")))" }.joined(separator: ", "))
             for skipped in imported.skipped { print("Ignoré : \(skipped)") }
             let missing = imported.providers.filter { !ProviderKeys.hasKey(for: $0.id) }.map(\.id)
-            if !missing.isEmpty { print("Clés à ajouter : " + missing.map { "lml provider set-key \($0)" }.joined(separator: " ; ")) }
+            if !missing.isEmpty { print("Clés à ajouter : " + missing.map { "llmarium provider set-key \($0)" }.joined(separator: " ; ")) }
             print("Enregistré dans \(ProxyConfig.file.path)")
         case "provider":
             let action = options.positional.dropFirst().first ?? "list"
             let config = ProxyConfig.load()
             switch action {
             case "list":
-                if config.providers.isEmpty { print("Aucun fournisseur distant. Importez-les avec lml proxy import-litellm <fichier>.") }
+                if config.providers.isEmpty { print("Aucun fournisseur distant. Importez-les avec llmarium proxy import-litellm <fichier>.") }
                 for provider in config.providers {
                     let scope = provider.prefix.map { "\($0)*" } ?? provider.models.joined(separator: ", ")
                     print("\(provider.id) · \(provider.name) · \(scope) · clé \(ProviderKeys.hasKey(for: provider.id) ? "présente" : "absente")")
@@ -206,7 +206,7 @@ struct LML {
                 do { try ProviderKeys.setKey(key, for: id) } catch { fail("\(error)") }
                 print("Clé \(id) enregistrée dans le trousseau.")
             default:
-                fail("lml provider list | set-key <id> | remove-key <id>")
+                fail("llmarium provider list | set-key <id> | remove-key <id>")
             }
         case "proxy":
             let config = ProxyConfig.load()
@@ -221,7 +221,7 @@ struct LML {
             do { try await server.start() } catch { fail("\(error)") }
             while true { try? await Task.sleep(for: .seconds(3600)) }
         case "sync":
-            guard let proxy = await runningProxy() else { fail("Le point d'entrée ne répond pas : démarrez-le dans l'app ou avec lml proxy.") }
+            guard let proxy = await runningProxy() else { fail("Le point d'entrée ne répond pas : démarrez-le dans l'app ou avec llmarium proxy.") }
             let snapshot = await Inventory.take()
             let table = RouteTable.build(runtime: await Runtime.current(), config: ProxyConfig.load())
             let models = HarnessSync.catalog(snapshot: snapshot, table: table)
@@ -238,10 +238,10 @@ struct LML {
                 for recipe in RecipeStore.shared.all() {
                     print("\(recipe.engine.title) · \(recipe.model) · \(recipe.author.title) · \(recipe.updatedAt.formatted(date: .abbreviated, time: .omitted))")
                 }
-                if RecipeStore.shared.all().isEmpty { print("Aucune recette enregistrée : les recettes déduites sont calculées à la volée (lml recipe show <modèle>).") }
+                if RecipeStore.shared.all().isEmpty { print("Aucune recette enregistrée : les recettes déduites sont calculées à la volée (llmarium recipe show <modèle>).") }
                 break
             }
-            guard let query = options.positional.dropFirst(2).first else { fail("lml recipe show|set <modèle> [--engine …]") }
+            guard let query = options.positional.dropFirst(2).first else { fail("llmarium recipe show|set <modèle> [--engine …]") }
             let snapshot = await Inventory.take()
             guard case .success(let model) = ModelResolver.find(query, in: snapshot.models) else { fail("Modèle introuvable : \(query)") }
             let engines = EngineCompatibility.engines(for: model, snapshot: snapshot)
@@ -286,7 +286,7 @@ struct LML {
             // Straight to the engine: the proxy would add a hop to the numbers.
             guard let target = HarnessTarget.targets(in: snapshot).first(where: { $0.modelID.localizedCaseInsensitiveContains(query) }),
                   let running = snapshot.running.first(where: { $0.models.contains(target.modelID) }) else {
-                fail("« \(query) » n'est pas en mémoire : lancez-le d'abord (lml start).")
+                fail("« \(query) » n'est pas en mémoire : lancez-le d'abord (llmarium start).")
             }
             let local = snapshot.models.first { target.engine == .omlx ? OMLXIdentity.matches(target.modelID, $0) : LaunchPlan.servedName($0) == target.modelID }
             let recipe = local.map { RecipeDeriver.effective(model: $0, engine: target.engine) }
@@ -301,7 +301,7 @@ struct LML {
             do { try BenchmarkStore.shared.add(result) } catch { fail("\(error)") }
             print(Report.benchmark(result))
         case "radar" where options.positional.dropFirst().first == "download":
-            guard let repo = options.positional.dropFirst(2).first, repo.contains("/") else { fail("lml radar download <owner/name> [--engine omlx|mtplx|mlx-serve] [--yes]") }
+            guard let repo = options.positional.dropFirst(2).first, repo.contains("/") else { fail("llmarium radar download <owner/name> [--engine omlx|mtplx|mlx-serve] [--yes]") }
             let snapshot = await Inventory.take()
             let item = Radar.cached()?.items.first { $0.id == repo }
             let engine = options.value("engine").flatMap { name in EngineKind.allCases.first { $0.rawValue.lowercased() == name.lowercased().replacingOccurrences(of: "-", with: "") } }

@@ -64,11 +64,11 @@ final class AttributionTests: XCTestCase {
                                     footprintBytes: 1, parentPID: 1, startedAt: start, responsiblePID: 77)
         let entry = LaunchedServer(pid: 77, startedAt: start, engine: .mtplx, model: "a/b", port: 18100, context: nil, logPath: "/l", arguments: [])
         let attribution = LaunchAttributor(processes: [server], launched: [entry]) { _ in (nil, nil) }.attribute(server)
-        XCTAssertEqual(attribution.summary, "Modèles locaux")
+        XCTAssertEqual(attribution.summary, "LLMarium")
         XCTAssertFalse(attribution.isOrphan)
         var reused = server
         reused.startedAt = Date(timeIntervalSince1970: 9_000)
-        XCTAssertNotEqual(LaunchAttributor(processes: [reused], launched: [entry]) { _ in (nil, nil) }.attribute(reused).summary, "Modèles locaux",
+        XCTAssertNotEqual(LaunchAttributor(processes: [reused], launched: [entry]) { _ in (nil, nil) }.attribute(reused).summary, "LLMarium",
                           "a reused PID is not this app's server")
     }
 

@@ -51,7 +51,7 @@ public struct LaunchAttributor {
         self.sessionTitle = sessionTitle
     }
 
-    public static let appStep = LaunchStep("Modèles locaux")
+    public static let appStep = LaunchStep("LLMarium")
 
     static let agents = ["claude": "Claude Code", "codex": "Codex", "pi": "Pi", "opencode": "OpenCode", "opencode2": "OpenCode",
                          "dsh": "DeepSeek Harness", "hermes": "Hermes", "mtplx": "MTPLX", "omlx": "oMLX"]

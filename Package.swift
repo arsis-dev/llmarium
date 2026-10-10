@@ -2,16 +2,16 @@
 import PackageDescription
 
 let package = Package(
-    name: "LocalModelLauncher",
+    name: "LLMarium",
     platforms: [.macOS("26.0")],
     products: [
-        .executable(name: "LocalModelLauncher", targets: ["LocalModelLauncher"]),
-        .executable(name: "lml", targets: ["lml"])
+        .executable(name: "LLMariumApp", targets: ["LLMariumApp"]),
+        .executable(name: "llmarium", targets: ["llmarium"])
     ],
     targets: [
         .target(name: "ModelCore"),
-        .executableTarget(name: "lml", dependencies: ["ModelCore"]),
-        .executableTarget(name: "LocalModelLauncher", dependencies: ["ModelCore"]),
+        .executableTarget(name: "llmarium", dependencies: ["ModelCore"]),
+        .executableTarget(name: "LLMariumApp", dependencies: ["ModelCore"]),
         .testTarget(name: "ModelCoreTests", dependencies: ["ModelCore"])
     ]
 )
