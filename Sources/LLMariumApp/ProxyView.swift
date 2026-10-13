@@ -39,7 +39,7 @@ final class ProxyController: ObservableObject {
         state = .starting
         let server = ProxyServer(port: config.port, tableProvider: {
             RouteTable.build(runtime: await Runtime.current(), config: ProxyConfig.load())
-        }, log: { line in
+        }, logFile: AppPaths.logs.appending(path: "proxy.log"), log: { line in
             Task { @MainActor in ProxyController.shared.append(line) }
         })
         self.server = server

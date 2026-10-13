@@ -59,12 +59,24 @@ public final class ProxyServer: @unchecked Sendable {
     private let tableLock = NSLock()
     private var table = RouteTable(aliases: [], servers: [], providers: [])
     private var tableDate = Date.distantPast
+    /// The rebuild in flight, shared by every request that needs a fresh table: never two inventories at once.
+    private var refreshing: Task<RouteTable, Never>?
+    /// How long a request waits for a fresh table before routing with the previous one.
+    let refreshBudget: Duration
+    /// An upstream that sends nothing for this long is cut: the client gets a 504 instead of waiting forever.
+    let upstreamIdleTimeout: TimeInterval
+    private let logFile: URL?
 
     public init(port: Int, tableProvider: @escaping @Sendable () async -> RouteTable,
-                keyProvider: @escaping @Sendable (String) -> String? = { ProviderKeys.key(for: $0) }, log: @escaping Logger = { _ in }) {
+                keyProvider: @escaping @Sendable (String) -> String? = { ProviderKeys.key(for: $0) },
+                refreshBudget: Duration = .seconds(3), upstreamIdleTimeout: TimeInterval = 300,
+                logFile: URL? = nil, log: @escaping Logger = { _ in }) {
         self.port = port
         self.tableProvider = tableProvider
         self.keyProvider = keyProvider
+        self.refreshBudget = refreshBudget
+        self.upstreamIdleTimeout = upstreamIdleTimeout
+        self.logFile = logFile
         self.log = log
     }
 
@@ -80,7 +92,7 @@ public final class ProxyServer: @unchecked Sendable {
     /// Starts listening on 127.0.0.1 and returns once ready. Not on ::1: Network.framework refuses a second family on
     /// the same port, and clients of `localhost` fall back to IPv4 (LiteLLM in OrbStack listens on 127.0.0.1 only too).
     public func start() async throws {
-        await refreshTable()
+        await refreshTable(budget: nil)
         guard let port = NWEndpoint.Port(rawValue: UInt16(port)) else { throw StartError.portUnavailable(self.port, "numéro invalide") }
         let parameters = NWParameters.tcp
         (parameters.defaultProtocolStack.internetProtocol as? NWProtocolIP.Options)?.version = .v4
@@ -115,21 +127,54 @@ public final class ProxyServer: @unchecked Sendable {
     public var currentTable: RouteTable { tableLock.withLock { table } }
 
     /// Rebuilt at most every few seconds, and at once when a model is not found.
-    func refreshTable(ifOlderThan age: TimeInterval = 0) async {
-        let fresh = tableLock.withLock { Date().timeIntervalSince(tableDate) < age }
-        guard !fresh else { return }
-        let built = await tableProvider()
+    /// Rebuilt at most every few seconds, and at once when a model is not found. A single rebuild runs at a time;
+    /// a request waits for it at most `budget`, then routes with the previous table (a slow engine must not freeze
+    /// the entry point). The rebuild keeps running and its table serves the next requests.
+    func refreshTable(ifOlderThan age: TimeInterval = 0, budget: Duration? = nil) async {
+        let task: Task<RouteTable, Never>? = tableLock.withLock {
+            guard Date().timeIntervalSince(tableDate) >= age else { return nil }
+            if let refreshing { return refreshing }
+            let provider = tableProvider
+            let started = Task { [weak self] in
+                let built = await provider()
+                self?.store(built)
+                return built
+            }
+            refreshing = started
+            return started
+        }
+        guard let task else { return }
+        guard let budget else {
+            _ = await task.value
+            return
+        }
+        let arrived: Bool = await withCheckedContinuation { continuation in
+            let once = Once()
+            Task {
+                _ = await task.value
+                once.run { continuation.resume(returning: true) }
+            }
+            Task {
+                try? await Task.sleep(for: budget)
+                once.run { continuation.resume(returning: false) }
+            }
+        }
+        if !arrived { logRequest("Table de routage lente (plus de \(budget)) : la précédente sert en attendant.") }
+    }
+
+    private func store(_ built: RouteTable) {
         tableLock.withLock {
             table = built
             tableDate = Date()
+            refreshing = nil
         }
     }
 
     func resolve(model: String, path: String) async -> RouteResult {
-        await refreshTable(ifOlderThan: 5)
+        await refreshTable(ifOlderThan: 5, budget: refreshBudget)
         let first = currentTable.resolve(model: model, path: path)
         guard case .notFound = first else { return first }
-        await refreshTable(ifOlderThan: 1)
+        await refreshTable(ifOlderThan: 1, budget: refreshBudget)
         return currentTable.resolve(model: model, path: path)
     }
 
@@ -138,7 +183,22 @@ public final class ProxyServer: @unchecked Sendable {
         session.start()
     }
 
-    func logRequest(_ line: String) { log(line) }
+    func logRequest(_ line: String) {
+        log(line)
+        guard let logFile else { return }
+        let stamp = ISO8601DateFormatter().string(from: Date())
+        let data = Data("\(stamp) \(line)\n".utf8)
+        tableLock.withLock {
+            if let handle = try? FileHandle(forWritingTo: logFile) {
+                defer { try? handle.close() }
+                _ = try? handle.seekToEnd()
+                try? handle.write(contentsOf: data)
+            } else {
+                try? FileManager.default.createDirectory(at: logFile.deletingLastPathComponent(), withIntermediateDirectories: true)
+                try? data.write(to: logFile)
+            }
+        }
+    }
     func key(for provider: String) -> String? { keyProvider(provider) }
 }
 
@@ -153,6 +213,13 @@ final class Once: @unchecked Sendable {
         done = true
         body()
     }
+}
+
+/// Relay state of one answer; touched only on the session's serial queue.
+final class PipeState: @unchecked Sendable {
+    var sawFirst = false
+    var ended = false
+    var watchdog: DispatchWorkItem?
 }
 
 /// One client connection: read one request, answer it or relay it, close.
@@ -218,7 +285,7 @@ final class ProxySession: @unchecked Sendable {
         case ("GET", "/v1/models"), ("GET", "/models"):
             guard let server else { return reply(ProxyBody.error(status: 503, message: "Point d'entrée arrêté.")) }
             Task { [self] in
-                await server.refreshTable(ifOlderThan: 5)
+                await server.refreshTable(ifOlderThan: 5, budget: server.refreshBudget)
                 let list = server.currentTable.modelList()
                 queue.async { self.reply(ProxyBody.response(status: 200, reason: "OK", body: list)) }
             }
@@ -293,14 +360,37 @@ final class ProxySession: @unchecked Sendable {
 
     /// Copies the upstream response to the client as it arrives, then closes both.
     private func pipe(from upstream: NWConnection, first: @escaping (Data) -> Void, done: @escaping () -> Void) {
-        var sawFirst = false
+        let state = PipeState()
+        let idle = server?.upstreamIdleTimeout ?? 300
+        // Re-armed on every chunk: a stream that keeps flowing is never cut, a silent upstream is.
+        func arm() {
+            state.watchdog?.cancel()
+            let item = DispatchWorkItem { [self] in
+                guard !state.ended else { return }
+                state.ended = true
+                upstream.cancel()
+                done()
+                if state.sawFirst {
+                    client.cancel()
+                } else {
+                    reply(ProxyBody.error(status: 504, message: "Le fournisseur n'a rien envoyé en \(Int(idle)) s : requête abandonnée.", type: "upstream_timeout"))
+                }
+            }
+            state.watchdog = item
+            queue.asyncAfter(deadline: .now() + idle, execute: item)
+        }
+        arm()
         func next() {
             upstream.receive(minimumIncompleteLength: 1, maximumLength: 65_536) { [self] data, _, complete, error in
+                guard !state.ended else { return }
+                arm()
                 if let data, !data.isEmpty {
-                    if !sawFirst { sawFirst = true; first(data) }
+                    if !state.sawFirst { state.sawFirst = true; first(data) }
                     client.send(content: data, completion: .contentProcessed { sendError in
                         if sendError != nil {
                             // The client went away: stop the upstream request too.
+                            state.ended = true
+                            state.watchdog?.cancel()
                             upstream.cancel()
                             self.client.cancel()
                             done()
@@ -318,6 +408,9 @@ final class ProxySession: @unchecked Sendable {
             }
         }
         func finish() {
+            guard !state.ended else { return }
+            state.ended = true
+            state.watchdog?.cancel()
             upstream.cancel()
             client.send(content: nil, contentContext: .finalMessage, isComplete: true, completion: .contentProcessed { [self] _ in
                 client.cancel()

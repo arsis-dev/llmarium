@@ -219,7 +219,7 @@ struct LLMariumCLI {
             let port = options.value("port").flatMap(Int.init) ?? config.port
             let server = ProxyServer(port: port, tableProvider: {
                 RouteTable.build(runtime: await Runtime.current(), config: ProxyConfig.load())
-            }, log: { line in
+            }, logFile: AppPaths.logs.appending(path: "proxy.log"), log: { line in
                 let stamp = Date().formatted(date: .omitted, time: .standard)
                 print("[\(stamp)] \(line)")
                 fflush(stdout)
