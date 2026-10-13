@@ -66,7 +66,7 @@ public enum ModelStarter {
     /// Re-reads memory now (not the snapshot the user looked at), refuses a model that does not fit unless `force`,
     /// then loads it in oMLX or starts an MTPLX / mlx-serve server for it.
     public static func start(_ model: LocalModel, engine: EngineKind, context: Int?, port: Int? = nil,
-                             snapshot: InventorySnapshot, force: Bool = false) async -> StartOutcome {
+                             snapshot: InventorySnapshot, force: Bool = false, idleStopAfterMinutes: Int? = nil) async -> StartOutcome {
         let runtime = await Runtime.current()
         let omlx = runtime.engines.first { $0.kind == .omlx }
         let recipe = RecipeDeriver.effective(model: model, engine: engine)
@@ -98,7 +98,7 @@ public enum ModelStarter {
             do {
                 let plan = try LaunchPlan.make(model: model, engine: engine, port: port,
                                                context: context ?? estimate.context, installation: installation, recipe: recipe)
-                return StartOutcome(estimate: estimate, result: await ModelLauncher.start(plan, model: model), refusal: nil)
+                return StartOutcome(estimate: estimate, result: await ModelLauncher.start(plan, model: model, idleStopAfterMinutes: idleStopAfterMinutes), refusal: nil)
             } catch {
                 return refuse("\(error)")
             }

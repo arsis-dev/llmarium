@@ -9,6 +9,8 @@ struct LaunchSheet: View {
     @State private var engine: EngineKind?
     @State private var context = 65_536
     @State private var confirmForce = false
+    @State private var stopWhenIdle = false
+    @State private var idleMinutes = 30
 
     private var snapshot: InventorySnapshot? { model.snapshot }
     private var engines: [EngineKind] { snapshot.map { EngineCompatibility.engines(for: item, snapshot: $0) } ?? [] }
@@ -20,8 +22,7 @@ struct LaunchSheet: View {
 
     private var estimate: MemoryEstimate? {
         guard let snapshot, let engine else { return nil }
-        return MemoryPlanner.estimate(model: item, engine: engine, context: context, memory: snapshot.memory,
-                                      omlx: snapshot.engine(.omlx)?.omlx, running: snapshot.running)
+        return MemoryPlanner.estimate(model: item, engine: engine, context: context, snapshot: snapshot)
     }
 
     var body: some View {
@@ -46,12 +47,21 @@ struct LaunchSheet: View {
                         Picker("Contexte", selection: $context) {
                             ForEach(contexts, id: \.self) { Text("\(Format.tokens($0)) tokens").tag($0) }
                         }
+                        Toggle("Arrêter s'il reste inactif", isOn: $stopWhenIdle)
+                        if stopWhenIdle {
+                            Picker("Après", selection: $idleMinutes) {
+                                ForEach([15, 30, 60, 120], id: \.self) { Text($0 < 60 ? "\($0) min" : "\($0 / 60) h").tag($0) }
+                            }
+                        }
                     }
                 } header: {
                     Text(item.name)
                 } footer: {
                     if engine == .omlx { Text("oMLX applique ses propres réglages de contexte pour ce modèle.") }
-                    else if engine != nil { Text("Le serveur écoute sur 127.0.0.1, sur un port libre entre 18100 et 18199. Il continue de tourner si l'app est quittée.") }
+                    else if engine != nil {
+                        Text("Le serveur écoute sur 127.0.0.1, sur un port libre entre 18100 et 18199. Il continue de tourner si l'app est quittée."
+                             + (stopWhenIdle ? " L'arrêt pour inactivité n'est compté que pendant que l'app est ouverte : sans requête ni client pendant ce temps, le serveur s'arrête et libère sa mémoire." : ""))
+                    }
                 }
                 if let estimate {
                     EstimateSection(estimate: estimate)
@@ -94,13 +104,22 @@ struct LaunchSheet: View {
     }
 
     private func start(_ engine: EngineKind, force: Bool) {
-        Task { await model.launch(item, engine: engine, context: engine == .omlx ? nil : context, force: force) }
+        Task {
+            await model.launch(item, engine: engine, context: engine == .omlx ? nil : context, force: force,
+                               idleStopAfterMinutes: engine != .omlx && stopWhenIdle ? idleMinutes : nil)
+        }
     }
 }
 
 /// Weights, cache and margin against what the engine can use now, with what to free when it does not fit.
 struct EstimateSection: View {
     var estimate: MemoryEstimate
+
+    private func speedDetail(_ speed: SpeedEstimate) -> String {
+        var parts = ["borne de la bande passante (\(Int(speed.bandwidth ?? 0)) Go/s ÷ \(Format.memory(speed.activeBytes ?? 0)) lus par token, \(speed.activeBasis ?? "dense"))"]
+        if let expected = speed.expectedTokensPerSecond { parts.insert("≈ \(SpeedEstimate.format(expected)) tok/s attendus d'après vos mesures", at: 0) }
+        return parts.joined(separator: " · ")
+    }
 
     var body: some View {
         SwiftUI.Section {
@@ -127,6 +146,15 @@ struct EstimateSection: View {
                     Text(estimate.availableBasis).font(.caption).foregroundStyle(.secondary).multilineTextAlignment(.trailing)
                 }
             }
+            if let gpu = estimate.gpuAvailableBytes {
+                LabeledContent("Plafond du GPU") {
+                    VStack(alignment: .trailing) {
+                        Text(Format.memory(max(0, gpu)))
+                        Text("\(Format.memory(estimate.gpuLimitBytes ?? 0)) (\(estimate.gpuLimitSource ?? "macOS")) moins les modèles en mémoire")
+                            .font(.caption).foregroundStyle(.secondary).multilineTextAlignment(.trailing)
+                    }
+                }
+            }
             LabeledContent("Verdict") {
                 switch estimate.verdict {
                 case .fits: StatePill(text: "Tient en mémoire", color: .green)
@@ -143,6 +171,16 @@ struct EstimateSection: View {
                         if let detail = candidate.detail { Text(detail).font(.caption) }
                     }
                 }
+            }
+            if let speed = estimate.speed {
+                LabeledContent("Vitesse de génération") {
+                    VStack(alignment: .trailing) {
+                        Text(speed.kind == .measured ? "\(SpeedEstimate.format(speed.tokensPerSecond)) tok/s" : "≤ \(SpeedEstimate.format(speed.tokensPerSecond)) tok/s")
+                        Text(speed.kind == .measured ? speed.summary : speedDetail(speed))
+                            .font(.caption).foregroundStyle(.secondary).multilineTextAlignment(.trailing)
+                    }
+                }
+                .help("Chaque token généré relit les poids actifs : la bande passante de la puce fixe un plafond. Les petits modèles restent bien en dessous, et le décodage spéculatif de MTPLX peut le dépasser. Une mesure (« Mesurer » dans « En cours ») remplace cette borne.")
             }
         } header: {
             Text("Mémoire")

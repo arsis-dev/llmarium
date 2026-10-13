@@ -44,6 +44,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         Task { await InventoryModel.shared.refresh() }
         ProxyController.shared.startIfEnabled()
+        Task {
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(60))
+                await InventoryModel.shared.checkIdleServers()
+            }
+        }
         if !UserDefaults.standard.bool(forKey: "hasShownMainWindow") {
             AppWindows.showMain(InventoryModel.shared)
             UserDefaults.standard.set(true, forKey: "hasShownMainWindow")

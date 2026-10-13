@@ -117,12 +117,60 @@ public struct RadarItem: Codable, Hashable, Sendable, Identifiable {
     public var downloads: Int
     public var score: Double
     public var gated = false
+    /// What the model is for, each with the clue it was read from. Optional: lists cached before it decode as « non classé ».
+    public var usages: [UsageTag]?
 
     public static let gatedWarning = "Accès soumis à acceptation sur Hugging Face"
 
     public var url: String { "https://huggingface.co/\(id)" }
     public var author: String { String(id.split(separator: "/").first ?? "") }
     public var name: String { String(id.split(separator: "/").last ?? Substring(id)) }
+}
+
+/// What a model is meant for, as its name and Hub tags say. A hint for sorting the radar, not a judgment of quality.
+public enum ModelUsage: String, Codable, CaseIterable, Sendable {
+    case code, chat, reasoning, vision
+
+    public var title: String {
+        switch self {
+        case .code: "Code"
+        case .chat: "Chat"
+        case .reasoning: "Raisonnement"
+        case .vision: "Vision"
+        }
+    }
+
+    /// Words of a repository name that mark each usage, matched on word boundaries.
+    static let nameClues: [(ModelUsage, [String])] = [
+        (.code, ["coder", "code", "codestral", "devstral", "starcoder", "codegemma"]),
+        (.reasoning, ["thinking", "reasoning", "reasoner", "r1", "qwq", "think"]),
+        (.vision, ["vl", "vision", "omni", "llava", "pixtral"]),
+        (.chat, ["instruct", "chat", "it"])
+    ]
+
+    public static func classify(name: String, tags: [String], pipelineTag: String?) -> [UsageTag] {
+        let words = Set(name.lowercased().split(whereSeparator: { !$0.isLetter && !$0.isNumber }).map(String.init))
+        var found: [UsageTag] = []
+        func add(_ usage: ModelUsage, _ clue: String) {
+            if !found.contains(where: { $0.usage == usage }) { found.append(UsageTag(usage: usage, clue: clue)) }
+        }
+        for (usage, clues) in nameClues {
+            if let word = clues.first(where: words.contains) { add(usage, "d'après le nom (« \(word) »)") }
+        }
+        if pipelineTag == "image-text-to-text" { add(.vision, "étiquette Hugging Face image-text-to-text") }
+        for (tag, usage) in [("code", ModelUsage.code), ("reasoning", .reasoning), ("conversational", .chat)] where tags.contains(tag) {
+            add(usage, "étiquette Hugging Face \(tag)")
+        }
+        // A base model completes text: it is not tuned for chat.
+        if found.isEmpty, !words.contains("base") { add(.chat, "par défaut : modèle de texte sans autre indice") }
+        return found
+    }
+}
+
+public struct UsageTag: Codable, Hashable, Sendable {
+    public var usage: ModelUsage
+    /// Why, in French: « d'après le nom (« coder ») ».
+    public var clue: String
 }
 
 public struct RadarExclusion: Codable, Hashable, Sendable, Error {
@@ -190,6 +238,14 @@ public enum RadarFilter {
         }
         score += log10(Double(max(candidate.likes, 1))) * 0.5
         var warnings: [String] = []
+        // Trending lists and bookmarks can bring back old models: one point less per six months past the first six.
+        if let created = candidate.createdAt {
+            let months = Int(now.timeIntervalSince(created) / (30 * 86_400))
+            if months > 6 {
+                score -= Double(months - 6) / 6
+                warnings.append("Publié il y a \(months) mois : des versions plus récentes existent peut-être")
+            }
+        }
         if candidate.gated { warnings.append(RadarItem.gatedWarning) }
         if candidate.sizeBytes == nil { warnings.append("Taille inconnue") }
         if candidate.multipleVariants {
@@ -197,7 +253,9 @@ public enum RadarFilter {
         }
         return .success(RadarItem(id: candidate.id, createdAt: candidate.createdAt, sizeBytes: candidate.sizeBytes,
                                   engines: engines(for: candidate.id), reasons: reasons, warnings: warnings, relatedLocal: related,
-                                  likes: candidate.likes, downloads: candidate.downloads, score: score, gated: candidate.gated))
+                                  likes: candidate.likes, downloads: candidate.downloads, score: score, gated: candidate.gated,
+                                  usages: ModelUsage.classify(name: candidate.id.split(separator: "/").last.map(String.init) ?? candidate.id,
+                                                              tags: candidate.tags, pipelineTag: candidate.pipelineTag)))
     }
 
     /// Guessed from who publishes and how the repository is named; the UI says « probable ».

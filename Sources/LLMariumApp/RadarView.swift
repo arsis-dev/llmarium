@@ -13,6 +13,12 @@ struct RadarView: View {
     @State private var pendingItem: RadarItem?
     @State private var message: String?
     @State private var showExcluded = false
+    @State private var usage: ModelUsage?
+
+    private var shownItems: [RadarItem] {
+        guard let usage else { return report?.items ?? [] }
+        return (report?.items ?? []).filter { $0.usages?.contains { $0.usage == usage } == true }
+    }
 
     var body: some View {
         Form {
@@ -35,10 +41,19 @@ struct RadarView: View {
 
             if let report {
                 SwiftUI.Section {
-                    if report.items.isEmpty { Text("Aucun modèle retenu.").foregroundStyle(.secondary) }
-                    ForEach(report.items) { item in
-                        RadarRow(item: item) { engine in prepare(item, engine: engine) }
+                    Picker("Usage", selection: $usage) {
+                        Text("Tous").tag(ModelUsage?.none)
+                        ForEach(ModelUsage.allCases, id: \.self) { Text($0.title).tag(ModelUsage?.some($0)) }
                     }
+                    .pickerStyle(.segmented)
+                    if shownItems.isEmpty {
+                        Text(report.items.isEmpty ? "Aucun modèle retenu." : "Aucun modèle pour cet usage.").foregroundStyle(.secondary)
+                    }
+                    ForEach(shownItems) { item in
+                        RadarRow(item: item, bandwidth: snapshot.machine.bandwidth) { engine in prepare(item, engine: engine) }
+                    }
+                } footer: {
+                    Text("Usages et vitesses sont des indices : l'usage vient du nom et des étiquettes Hugging Face (survolez une étiquette pour voir lequel), la vitesse est la borne fixée par la bande passante de la puce.")
                 }
                 SwiftUI.Section {
                     DisclosureGroup("Écartés : \(report.excluded.count)", isExpanded: $showExcluded) {
@@ -126,6 +141,7 @@ struct RadarView: View {
 
 struct RadarRow: View {
     var item: RadarItem
+    var bandwidth: Double?
     var download: (EngineKind) -> Void
 
     var body: some View {
@@ -136,6 +152,15 @@ struct RadarRow: View {
                 Text(item.sizeBytes.map(Format.bytes) ?? "taille ?").monospacedDigit().foregroundStyle(.secondary)
             }
             Text(item.reasons.joined(separator: " · ")).font(.callout).foregroundStyle(.secondary)
+            HStack(spacing: 6) {
+                ForEach(item.usages ?? [], id: \.self) { tag in
+                    StatePill(text: tag.usage.title, color: .blue).help(tag.clue)
+                }
+                if let speed = item.speedBound(bandwidth: bandwidth) {
+                    Text("≤ \(SpeedEstimate.format(speed.tokensPerSecond)) tok/s").font(.caption).foregroundStyle(.secondary)
+                        .help("Borne de la bande passante : \(Int(speed.bandwidth ?? 0)) Go/s ÷ \(Format.memory(speed.activeBytes ?? 0)) lus par token (\(speed.activeBasis ?? "dense")).")
+                }
+            }
             ForEach(item.warnings, id: \.self) { StatePill(text: $0, color: .orange) }
             HStack {
                 Text(item.engines.map(\.title).joined(separator: " ou ") + " (probable)" + (item.createdAt.map { " · publié le \($0.formatted(date: .abbreviated, time: .omitted))" } ?? ""))

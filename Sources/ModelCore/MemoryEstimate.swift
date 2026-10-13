@@ -25,12 +25,20 @@ public struct MemoryEstimate: Codable, Sendable {
     public var availableBytes: Int64
     /// Where the available figure comes from, in French.
     public var availableBasis: String
+    /// What the GPU may still take: macOS's limit for the GPU minus the models already in memory.
+    public var gpuAvailableBytes: Int64?
+    public var gpuLimitBytes: Int64?
+    public var gpuLimitSource: String?
     public var verdict: Verdict
     public var toFree: [FreeCandidate]
     public var notes: [String]
+    /// Generation speed, measured or bounded; set by the snapshot-based estimate.
+    public var speed: SpeedEstimate?
 
     public var totalBytes: Int64 { weightsBytes + kvCacheBytes + overheadBytes }
-    public var shortfallBytes: Int64 { max(0, totalBytes - availableBytes) }
+    public var shortfallBytes: Int64 { max(0, totalBytes - availableBytes, gpuAvailableBytes.map { totalBytes - $0 } ?? 0) }
+    /// The GPU limit, not the free memory, is what stops this model.
+    public var limitedByGPU: Bool { gpuAvailableBytes.map { totalBytes > $0 && $0 < availableBytes } ?? false }
 }
 
 public enum MemoryPlanner {
@@ -49,9 +57,19 @@ public enum MemoryPlanner {
         min(max(totalBytes / 8, 2 << 30), 8 << 30)
     }
 
+    /// Memory and speed from an inventory snapshot, as the app, the CLI and the MCP server show them.
+    public static func estimate(model: LocalModel, engine: EngineKind, context: Int?, snapshot: InventorySnapshot,
+                                benchmarks: [BenchmarkResult] = BenchmarkStore.shared.all()) -> MemoryEstimate {
+        var estimate = estimate(model: model, engine: engine, context: context, memory: snapshot.memory,
+                                omlx: snapshot.engine(.omlx)?.omlx, running: snapshot.running, gpu: snapshot.machine.gpu)
+        estimate.speed = SpeedPlanner.estimate(model: model, engine: engine, weightsBytes: estimate.weightsBytes, machine: snapshot.machine,
+                                               models: snapshot.models, benchmarks: benchmarks)
+        return estimate
+    }
+
     public static func estimate(model: LocalModel, engine: EngineKind, context requested: Int?,
                                 memory: MemoryReport, omlx: OMLXState?, running: [RunningModel],
-                                measurements: MeasurementStore = .shared) -> MemoryEstimate {
+                                gpu: GPUInfo? = .current, measurements: MeasurementStore = .shared) -> MemoryEstimate {
         var notes: [String] = []
         var weights = model.sizeBytes
         var measurement: Measurement?
@@ -84,7 +102,13 @@ public enum MemoryPlanner {
             basis = "Mémoire non utilisée par les apps, moins \(Format.memory(reserve)) laissés à macOS"
         }
         let total = weights + kv + overhead
-        let verdict: MemoryEstimate.Verdict = total > available ? .tooLarge : (available - total < total / 10 ? .tight : .fits)
+        // Every model in memory counts against the GPU limit, whichever engine holds it.
+        let gpuAvailable = gpu?.limitBytes.map { $0 - running.reduce(0) { $0 + $1.footprintBytes } }
+        let room = min(available, gpuAvailable ?? available)
+        let verdict: MemoryEstimate.Verdict = total > room ? .tooLarge : (room - total < total / 10 ? .tight : .fits)
+        if let gpuAvailable, total > gpuAvailable, gpuAvailable < available {
+            notes.append("macOS ne laisse au GPU que \(Format.memory(gpu?.limitBytes ?? 0)) (\(gpu?.limitSource ?? "plafond de macOS")) : avec les modèles déjà en mémoire, il reste \(Format.memory(max(0, gpuAvailable))).")
+        }
 
         var candidates = running.map { item in
             FreeCandidate(title: item.title, bytes: item.footprintBytes,
@@ -97,6 +121,7 @@ public enum MemoryPlanner {
 
         return MemoryEstimate(weightsBytes: weights, weightsMeasurement: measurement, kvBytesPerToken: perToken, context: context,
                               kvCacheBytes: kv, overheadBytes: overhead, availableBytes: available, availableBasis: basis,
+                              gpuAvailableBytes: gpuAvailable, gpuLimitBytes: gpu?.limitBytes, gpuLimitSource: gpu?.limitSource,
                               verdict: verdict, toFree: candidates.sorted { $0.bytes > $1.bytes }, notes: notes)
     }
 }

@@ -122,3 +122,14 @@ Extrait :
 | JANGQ-AI/MiniMax-M2.7-JANG_3L | 95,2 Go | oMLX ou mlx-serve | Favori Spicilege du 12 avr. 2026 |
 
 Au premier passage, la tête de liste (`mohit67890/imajev-4b`, 981 Mo) était un adaptateur LoRA de Qwen3.5-4B, inutilisable seul : les adaptateurs sont désormais écartés, et les dépôts à plusieurs variantes signalés (leur taille est la somme, et `hf download` les prend toutes). Moteurs attribués d'après l'auteur et le nom (« probable »). Non vérifié : un téléchargement réel, et le moment où oMLX découvre un modèle arrivé dans le cache Hugging Face.
+
+## Étape 7 — 10 octobre 2026
+
+M5 Max (GPU 40 cœurs, `gpu-core-count` lu dans l'I/O Registry), 128 Go.
+
+- **Plafond du GPU** : `recommendedMaxWorkingSetSize` vaut 120 Go, et `iogpu.wired_limit_mb` est relevé à 122 880 : Metal reflète bien ce réglage. Le plafond d'oMLX (58 Go) est un réglage distinct. Pour le 27B MTPLX à 64K : 25,2 Go nécessaires, 22,4 Go de mémoire libre, 111 Go de GPU disponible ; c'est la mémoire libre qui bloque.
+- **Vitesse** : bande passante de 614 Go/s (M5 Max 40 cœurs ; 460 Go/s pour 32 cœurs, d'après les fiches Apple relayées par la presse en mars 2026). Bornes calculées : Qwen3.8-27B MTPLX (19,3 Go, dense) ≤ 30 tok/s ; Qwen3.8-Flash-Next oMLX (MoE, 10 experts sur 512 par token, 2,7 Go lus par token) ≤ 214 tok/s. Le 4B MTPLX affiche sa mesure du 9 octobre (33 tok/s, perturbée). Les deux mesures existantes sont perturbées : aucune ne sert d'étalonnage.
+- **Arrêt pour inactivité** : un serveur mlx-serve au repos consomme 0,000 s de CPU par 10 s (sondages de l'app compris) ; MTPLX au repos environ 0,12 s par minute, et une requête de 5 tokens 0,13 s. Le CPU seul ne distingue donc pas une petite requête du repos sur MTPLX : MTPLX écrit une ligne par génération dans son journal, et la croissance du journal compte comme activité (seuil CPU fixé à 0,5 s par minute). `proc_pid_rusage` compte en ticks Mach (125/3 ns sur cette puce).
+- Essai réel avec `llmarium start Youssofal/Qwen3.5-4B-MTPLX-Optimized-Speed --idle 1` : sans requête, arrêt par l'app une minute après le premier relevé (11:23) ; avec une requête de 5 tokens à 11:25:20, activité notée par le journal à 11:25:45, arrêt vers 11:26:50 ; `launched.json` vidé à chaque fois.
+- **Radar** : `llmarium radar --usage code` ne garde que `mlx-community/gemma-4-12b-coder-…` (Code, Raisonnement, Chat · ≤ 92 tok/s). Usages lus dans le nom (mots entiers) et les étiquettes Hugging Face.
+- **Corbeille** : vérifiée seulement par les tests sur dossiers temporaires (dépôt Hugging Face entier, lien seul, liens dépendants, refus d'un modèle en mémoire). Aucun modèle réel n'a été mis à la corbeille.

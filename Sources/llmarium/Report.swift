@@ -67,6 +67,9 @@ enum Report {
         lines.append("  marge        \(pad(Format.memory(estimate.overheadBytes), 9))  exécution")
         lines.append("  total        \(pad(Format.memory(estimate.totalBytes), 9))")
         lines.append("  disponible   \(pad(Format.memory(max(0, estimate.availableBytes)), 9))  \(estimate.availableBasis)")
+        if let gpu = estimate.gpuAvailableBytes {
+            lines.append("  GPU          \(pad(Format.memory(max(0, gpu)), 9))  plafond du GPU de \(Format.memory(estimate.gpuLimitBytes ?? 0)) (\(estimate.gpuLimitSource ?? "macOS")) moins les modèles en mémoire")
+        }
         switch estimate.verdict {
         case .fits: lines.append("→ Tient en mémoire.")
         case .tight: lines.append("→ Tient, mais de justesse.")
@@ -77,6 +80,9 @@ enum Report {
             for candidate in estimate.toFree.prefix(6) {
                 lines.append("  \(pad(Format.memory(candidate.bytes), 9)) \(candidate.title)\(candidate.detail.map { " · \($0)" } ?? "")")
             }
+        }
+        if let speed = estimate.speed {
+            lines.append("Vitesse : \(speed.summary)" + (speed.activeBasis.map { " ; poids lus par token : \(Format.memory(speed.activeBytes ?? 0)), \($0)" } ?? ""))
         }
         lines += estimate.notes.map { "Note : \($0)" }
         return lines.joined(separator: "\n")
@@ -138,7 +144,7 @@ enum Report {
         return lines.joined(separator: "\n")
     }
 
-    static func radar(_ report: RadarReport, all: Bool) -> String {
+    static func radar(_ report: RadarReport, all: Bool, bandwidth: Double?) -> String {
         var lines = ["Radar du \(report.fetchedAt.formatted(date: .abbreviated, time: .shortened))"]
         lines += report.sources.map { "  · \($0)" }
         lines.append("")
@@ -148,6 +154,9 @@ enum Report {
             let engines = item.engines.map(\.title).joined(separator: " ou ")
             lines.append("\(item.id)  \(size) · \(engines) (probable)\(item.createdAt.map { " · \($0.formatted(date: .abbreviated, time: .omitted))" } ?? "")")
             lines.append("    " + item.reasons.joined(separator: " · "))
+            var traits = item.usages.map { $0.isEmpty ? "usage non déterminé" : $0.map(\.usage.title).joined(separator: ", ") } ?? "usage non classé (liste à actualiser)"
+            if let speed = item.speedBound(bandwidth: bandwidth) { traits += " · " + speed.summary }
+            lines.append("    " + traits)
             for warning in item.warnings { lines.append("    ⚠︎ \(warning)") }
         }
         let counts = Dictionary(grouping: report.excluded, by: \.reason).mapValues(\.count).sorted { $0.value > $1.value }

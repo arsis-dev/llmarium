@@ -102,6 +102,7 @@ struct ModelsView: View {
     @State private var sortOrder = [KeyPathComparator(\LocalModel.sizeBytes, order: .reverse)]
     @State private var selection: LocalModel.ID?
     @State private var launchTarget: LocalModel?
+    @State private var trashPlan: TrashPlan?
 
     private var rows: [LocalModel] {
         snapshot.models
@@ -142,12 +143,23 @@ struct ModelsView: View {
                     NSPasteboard.general.clearContents()
                     NSPasteboard.general.setString(item.path, forType: .string)
                 }
+                Divider()
+                Button("Mettre à la corbeille…") { Task { trashPlan = await model.trashPlan(for: item) } }
             }
         } primaryAction: { ids in
             if let id = ids.first, let item = snapshot.model(id: id) { launchTarget = item }
         }
         .sheet(item: $launchTarget) { item in
             LaunchSheet(item: item)
+        }
+        .confirmationDialog("Mettre \(trashPlan?.model ?? "") à la corbeille ?",
+                            isPresented: Binding(get: { trashPlan != nil }, set: { if !$0 { trashPlan = nil } }), presenting: trashPlan) { plan in
+            Button("Mettre à la corbeille", role: .destructive) { Task { await model.moveToTrash(plan) } }
+            Button("Annuler", role: .cancel) {}
+        } message: { plan in
+            Text((["Va dans la corbeille : " + plan.items.joined(separator: ", "),
+                   plan.freedBytes > 0 ? "\(Format.bytes(plan.freedBytes)) libérés quand la corbeille sera vidée ; d'ici là, rien n'est supprimé."
+                                       : "Aucune place libérée : seul un lien part."] + plan.warnings).joined(separator: "\n\n"))
         }
         .searchable(text: $query, placement: .toolbar, prompt: "Rechercher un modèle")
         .toolbar {

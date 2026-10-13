@@ -14,8 +14,9 @@ struct LLMariumCLI {
       llmarium memory            Mémoire et plus gros consommateurs
       llmarium estimate <modèle> [--engine omlx|mtplx|mlx-serve] [--context N]
                             Mémoire nécessaire, disponible, et quoi libérer
-      llmarium start <modèle> [--engine …] [--context N] [--port N] [--force]
-                            Charge le modèle (refusé s'il ne tient pas, sauf --force)
+      llmarium start <modèle> [--engine …] [--context N] [--port N] [--force] [--idle minutes]
+                            Charge le modèle (refusé s'il ne tient pas, sauf --force) ; --idle : arrêt
+                            après ce temps sans activité, compté pendant que l'app est ouverte
       llmarium open <harness> [--model …] [--dir dossier] [--headless "consigne"] [--dry-run]
                             Ouvre le modèle dans claude, codex, pi, opencode ou dsh
                             (fenêtre Ghostty ; --headless : une fois, sans interface)
@@ -29,7 +30,7 @@ struct LLMariumCLI {
                             Recettes : réglages appliqués au lancement, sources et pièges connus
       llmarium bench <modèle> | list
                             Banc d'essai d'un modèle en mémoire, ou comparaison des mesures
-      llmarium radar [--refresh] [--all]
+      llmarium radar [--refresh] [--all] [--usage code|chat|raisonnement|vision]
                             Nouveaux modèles lançables sur ce Mac, avec leurs raisons (--all : les exclus aussi)
       llmarium radar download <owner/name> [--engine …] [--yes]
                             Télécharge un modèle après contrôle de l'espace disque
@@ -90,13 +91,18 @@ struct LLMariumCLI {
             }
             let context = options.value("context").flatMap(Int.init)
             if command == "estimate" {
-                let estimate = MemoryPlanner.estimate(model: model, engine: engine, context: context, memory: snapshot.memory,
-                                                      omlx: snapshot.engine(.omlx)?.omlx, running: snapshot.running)
+                let estimate = MemoryPlanner.estimate(model: model, engine: engine, context: context, snapshot: snapshot)
                 json ? emit(estimate) : print(Report.estimate(estimate, model: model, engine: engine, engines: engines))
             } else {
+                let idle = options.value("idle").flatMap(Int.init)
+                if options.value("idle") != nil, idle == nil || idle! < 1 { fail("--idle : un nombre de minutes, au moins 1.") }
+                if idle != nil, engine == .omlx { fail("--idle ne s'applique pas à oMLX, qui décharge ses modèles lui-même.") }
                 if !json { print("Lancement de \(model.name) sur \(engine.title)…") }
                 let outcome = await ModelStarter.start(model, engine: engine, context: context, port: options.value("port").flatMap(Int.init),
-                                                       snapshot: snapshot, force: options.flag("force"))
+                                                       snapshot: snapshot, force: options.flag("force"), idleStopAfterMinutes: idle)
+                if let idle, outcome.refusal == nil, !json {
+                    print("Arrêt après \(idle) min sans activité, tant que l'app LLMarium est ouverte.")
+                }
                 print(Report.start(outcome, model: model, engine: engine))
                 if outcome.refusal != nil { exit(1) }
                 if case .failed = outcome.result { exit(1) }
@@ -329,8 +335,14 @@ struct LLMariumCLI {
             exit(process.terminationStatus)
         case "radar":
             let snapshot = await Inventory.take()
-            let report = await Radar.report(snapshot: snapshot, refresh: options.flag("refresh"))
-            json ? emit(report) : print(Report.radar(report, all: all))
+            var report = await Radar.report(snapshot: snapshot, refresh: options.flag("refresh"))
+            if let wanted = options.value("usage") {
+                guard let usage = ModelUsage.allCases.first(where: { $0.rawValue == wanted || $0.title.lowercased() == wanted.lowercased() }) else {
+                    fail("--usage : code, chat, raisonnement ou vision")
+                }
+                report.items = report.items.filter { $0.usages?.contains { $0.usage == usage } == true }
+            }
+            json ? emit(report) : print(Report.radar(report, all: all, bandwidth: snapshot.machine.bandwidth))
         case "help", "-h":
             print(usage)
         default:
@@ -363,7 +375,7 @@ struct Options {
     var positional: [String] = []
     var values: [String: String] = [:]
     var flags: Set<String> = []
-    static let valued: Set<String> = ["engine", "context", "port", "model", "dir", "headless", "reasoning", "temperature", "top-p", "top-k", "note"]
+    static let valued: Set<String> = ["engine", "context", "port", "model", "dir", "headless", "reasoning", "temperature", "top-p", "top-k", "note", "idle", "usage"]
 
     init(_ arguments: [String]) {
         var index = 0

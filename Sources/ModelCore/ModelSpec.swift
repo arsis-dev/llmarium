@@ -19,6 +19,12 @@ public struct ModelSpec: Codable, Hashable, Sendable {
     public var quantMethod: String?
     /// MLX writes its quantization under `quantization`; Hugging Face formats use `quantization_config`.
     public var hasMLXQuantization = false
+    /// Mixture of experts: routed experts per layer, experts used per token, and their sizes.
+    public var experts: Int?
+    public var expertsPerToken: Int?
+    public var expertIntermediateSize: Int?
+    public var sharedExpertIntermediateSize: Int?
+    public var tiedEmbeddings: Bool?
 
     public init() {}
 
@@ -62,6 +68,12 @@ public struct ModelSpec: Codable, Hashable, Sendable {
         spec.quantBits = (quant["bits"] as? NSNumber)?.intValue
         spec.quantGroupSize = (quant["group_size"] as? NSNumber)?.intValue
         spec.quantMethod = quant["quant_method"] as? String
+        spec.experts = int("num_experts") ?? int("num_local_experts") ?? int("n_routed_experts")
+        spec.expertsPerToken = int("num_experts_per_tok")
+        spec.expertIntermediateSize = int("moe_intermediate_size")
+        spec.sharedExpertIntermediateSize = int("shared_expert_intermediate_size")
+            ?? (int("n_shared_experts")).flatMap { count in spec.expertIntermediateSize.map { count * $0 } }
+        spec.tiedEmbeddings = value("tie_word_embeddings") as? Bool
         return spec
     }
 }

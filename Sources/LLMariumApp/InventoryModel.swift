@@ -67,11 +67,12 @@ final class InventoryModel: ObservableObject {
     @Published private(set) var launches: [String: LaunchJob] = [:]
     @Published var launchOutcome: ActionOutcome?
 
-    func launch(_ item: LocalModel, engine: EngineKind, context: Int?, force: Bool) async {
+    func launch(_ item: LocalModel, engine: EngineKind, context: Int?, force: Bool, idleStopAfterMinutes: Int? = nil) async {
         guard launches[item.id] == nil, let snapshot else { return }
         launches[item.id] = LaunchJob(modelID: item.id, modelName: item.name, engine: engine, startedAt: Date())
         defer { launches[item.id] = nil }
-        let outcome = await ModelStarter.start(item, engine: engine, context: context, snapshot: snapshot, force: force)
+        let outcome = await ModelStarter.start(item, engine: engine, context: context, snapshot: snapshot, force: force,
+                                               idleStopAfterMinutes: idleStopAfterMinutes)
         if let refusal = outcome.refusal {
             launchOutcome = ActionOutcome(title: "\(item.name) n'a pas été lancé", message: refusal)
         } else {
@@ -118,6 +119,67 @@ final class InventoryModel: ObservableObject {
     }
 
     @Published var benchmarkResults = BenchmarkStore.shared.all()
+
+    /// Servers stopped for inactivity, newest first, until the user clears them.
+    @Published var idleStops: [String] = []
+
+    /// Stops the servers started with an idle limit once they have done nothing for that long. Runs every minute
+    /// while the app is open; nothing is checked when it is closed.
+    func checkIdleServers() async {
+        let registry = LaunchRegistry.shared
+        registry.reconcile()
+        let watched = registry.servers().filter { $0.idleStopAfterMinutes != nil }
+        guard !watched.isEmpty else { return }
+        let running = await Runtime.current().running
+        var stopped = false
+        for server in watched {
+            let clients = running.first { $0.pid == server.pid }?.clients ?? []
+            let (updated, stop) = IdlePolicy.check(server, cpuSeconds: ProcessScanner.cpuSeconds(of: server.pid),
+                                                   logBytes: IdlePolicy.logBytes(server), hasClients: !clients.isEmpty)
+            registry.add(updated)
+            guard stop else { continue }
+            let minutes = server.idleStopAfterMinutes ?? 0
+            switch await ModelActions.stop(pid: server.pid, startedAt: server.startedAt) {
+            case .stopped:
+                idleStops.insert("\(server.model) (\(server.engine.title)) arrêté à \(Date().formatted(date: .omitted, time: .shortened)) après \(minutes) min sans activité.", at: 0)
+                stopped = true
+            case .stillRunning:
+                // One attempt only: the user decides on a forced stop from its card.
+                var kept = updated
+                kept.idleStopAfterMinutes = nil
+                registry.add(kept)
+                idleStops.insert("\(server.model) n'a pas répondu à la demande d'arrêt après \(minutes) min d'inactivité : arrêtez-le depuis sa carte.", at: 0)
+            case .processChanged, .failed:
+                break
+            }
+        }
+        registry.reconcile()
+        if stopped { await refresh() }
+    }
+
+    /// What « Mettre à la corbeille » would do, re-read against what runs now; a refusal is shown as an outcome.
+    func trashPlan(for item: LocalModel) async -> TrashPlan? {
+        await refresh()
+        guard let snapshot else { return nil }
+        switch ModelTrash.plan(item, models: snapshot.models, running: snapshot.running, omlx: snapshot.engine(.omlx)?.omlx) {
+        case .success(let plan): return plan
+        case .failure(let refusal):
+            launchOutcome = ActionOutcome(title: "\(item.name) reste en place", message: refusal.description)
+            return nil
+        }
+    }
+
+    func moveToTrash(_ plan: TrashPlan) async {
+        do {
+            let landed = try ModelTrash.moveToTrash(plan)
+            launchOutcome = ActionOutcome(title: "\(plan.model) est dans la corbeille",
+                                    message: (plan.freedBytes > 0 ? "\(Format.bytes(plan.freedBytes)) seront libérés quand vous viderez la corbeille. " : "")
+                                        + "Pour l'annuler, remettez « \(landed.first?.lastPathComponent ?? "") » à sa place depuis la corbeille.")
+        } catch {
+            launchOutcome = ActionOutcome(title: "Mise à la corbeille impossible", message: error.localizedDescription)
+        }
+        await refresh(full: true)
+    }
 
     /// Result of the last unload or stop, shown until dismissed.
     @Published var outcome: ActionOutcome?

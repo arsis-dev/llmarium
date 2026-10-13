@@ -169,7 +169,7 @@ Deux passes sur l'API publique de Hugging Face (liste, puis fiche détaillée av
 
 **Terminé quand** le radar présente une liste courte de modèles lançables sur ce Mac, sans modèles d'image ou de vidéo ni formats inutilisables.
 
-### Étape 7 — Idées reprises d'outils voisins — décidée le 10 octobre 2026
+### Étape 7 — Idées reprises d'outils voisins — décidée et livrée le 10 octobre 2026
 
 Idées vues dans Paddock (MaximeDeconinck), LlamaBarn, local-llm et ModelHub, retenues par l'utilisateur parce qu'elles servent le but de l'app. Aucune copie de code : seulement les idées.
 

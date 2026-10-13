@@ -79,11 +79,19 @@ struct RunningView: View {
 
     var body: some View {
         Group {
-            if snapshot.running.isEmpty && model.launches.isEmpty {
+            if snapshot.running.isEmpty && model.launches.isEmpty && model.idleStops.isEmpty {
                 ContentUnavailableView("Aucun modèle en mémoire", systemImage: "moon.zzz",
                                        description: Text("Ni les moteurs ni un autre processus ne gardent de modèle chargé."))
             } else {
                 Form {
+                    if !model.idleStops.isEmpty {
+                        SwiftUI.Section {
+                            ForEach(model.idleStops, id: \.self) { Text($0) }
+                            Button("Effacer") { model.idleStops = [] }
+                        } header: {
+                            Text("Arrêtés pour inactivité")
+                        }
+                    }
                     ForEach(Array(model.launches.values), id: \.id) { job in
                         SwiftUI.Section(job.modelName) {
                             HStack {
@@ -192,6 +200,16 @@ struct RunningCard: View {
             }
             LabeledContent("Clients connectés",
                            value: running.clients.isEmpty ? "Aucun à cet instant" : running.clients.map(\.title).joined(separator: ", "))
+            if let launched = LaunchRegistry.shared.server(pid: running.pid, startedAt: running.startedAt),
+               let minutes = launched.idleStopAfterMinutes {
+                LabeledContent("Arrêt automatique") {
+                    TimelineView(.periodic(from: .now, by: 30)) { context in
+                        let idle = Int(context.date.timeIntervalSince(launched.activeSince) / 60)
+                        Text("après \(minutes) min sans activité" + (idle >= 1 ? " · inactif depuis \(idle) min" : " · actif à l'instant"))
+                    }
+                }
+                .help("Compté pendant que l'app est ouverte, d'après le temps de calcul du serveur et ses clients connectés.")
+            }
             HStack {
                 if !targets.isEmpty {
                     Menu("Ouvrir dans…") {

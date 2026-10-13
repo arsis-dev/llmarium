@@ -175,6 +175,22 @@ public enum ProcessScanner {
         return value > 0 ? value : nil
     }
 
+    private static let timebase: mach_timebase_info_data_t = {
+        var info = mach_timebase_info_data_t()
+        mach_timebase_info(&info)
+        return info
+    }()
+
+    /// User and system CPU time of a process, in seconds. `proc_pid_rusage` counts in Mach ticks on Apple Silicon (125/3 ns here).
+    public static func cpuSeconds(of pid: pid_t) -> Double? {
+        var info = rusage_info_v4()
+        let status = withUnsafeMutablePointer(to: &info) { pointer in
+            pointer.withMemoryRebound(to: rusage_info_t?.self, capacity: 1) { proc_pid_rusage(pid, RUSAGE_INFO_V4, $0) }
+        }
+        guard status == 0 else { return nil }
+        return Double(info.ri_user_time + info.ri_system_time) * Double(timebase.numer) / Double(timebase.denom) / 1e9
+    }
+
     static func footprint(of pid: pid_t) -> Int64? {
         var info = rusage_info_v4()
         let status = withUnsafeMutablePointer(to: &info) { pointer in

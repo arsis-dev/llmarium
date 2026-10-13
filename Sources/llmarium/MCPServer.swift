@@ -30,11 +30,10 @@ struct MCPServer {
             await Runtime.current().running
         },
         Tool(name: "estimate_memory",
-             description: "Mémoire nécessaire pour charger un modèle sur un moteur (poids mesurés ou taille sur disque, cache de contexte), mémoire disponible maintenant, verdict et quoi libérer. Lecture seule.",
+             description: "Mémoire nécessaire pour charger un modèle sur un moteur (poids mesurés ou taille sur disque, cache de contexte), mémoire disponible maintenant et plafond du GPU, verdict, quoi libérer, et vitesse de génération (mesurée, ou borne de la bande passante). Lecture seule.",
              properties: modelProperties, required: ["model"]) { arguments in
             await withModel(arguments) { model, engine, context, snapshot in
-                MemoryPlanner.estimate(model: model, engine: engine, context: context, memory: snapshot.memory,
-                                       omlx: snapshot.engine(.omlx)?.omlx, running: snapshot.running)
+                MemoryPlanner.estimate(model: model, engine: engine, context: context, snapshot: snapshot)
             }
         },
         Tool(name: "start_model",

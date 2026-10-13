@@ -4,12 +4,17 @@ public struct MachineInfo: Codable, Sendable {
     public var chip: String
     public var memoryBytes: Int64
     public var systemVersion: String
+    public var gpu: GPUInfo?
 
     public static func current() -> MachineInfo {
         MachineInfo(chip: sysctlString("machdep.cpu.brand_string") ?? "Mac",
                     memoryBytes: Int64(sysctlInt("hw.memsize") ?? 0),
-                    systemVersion: ProcessInfo.processInfo.operatingSystemVersionString)
+                    systemVersion: ProcessInfo.processInfo.operatingSystemVersionString,
+                    gpu: .current)
     }
+
+    /// Memory bandwidth in GB/s, when the chip is known.
+    public var bandwidth: Double? { ChipBandwidth.gigabytesPerSecond(chip: chip, gpuCores: gpu?.coreCount) }
 }
 
 /// Everything the inventory knows at one moment. Read-only: taking it never starts, loads or deletes anything.

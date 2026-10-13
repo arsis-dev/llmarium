@@ -14,6 +14,49 @@ public struct LaunchedServer: Codable, Hashable, Sendable {
     public var arguments: [String]
     /// Seconds from launch to the first answer of `/v1/models`.
     public var loadSeconds: Int?
+    /// Stop the server after this many minutes without activity. Only counted while the app is open.
+    public var idleStopAfterMinutes: Int?
+    /// Last time the server did something, and its CPU time and log size at the last check.
+    public var lastActiveAt: Date?
+    public var lastCPUSeconds: Double?
+    public var lastLogBytes: Int64?
+    public var lastCheckedAt: Date?
+
+    /// When it last did something: its last activity, otherwise the end of its loading.
+    public var activeSince: Date { lastActiveAt ?? startedAt.addingTimeInterval(TimeInterval(loadSeconds ?? 0)) }
+}
+
+/// When a server started with an idle limit should stop. Three signals, any of which counts as activity: its log
+/// grew (MTPLX writes one line per generation), it used CPU beyond its idle level, or a client is connected.
+/// Measured on 10 October 2026: mlx-serve idle uses no CPU, MTPLX idle about 0.12 s per minute, and a 5-token
+/// request on MTPLX 0.13 s — so CPU alone cannot tell a short request from idling, the log can.
+public enum IdlePolicy {
+    /// CPU seconds per minute that count as activity: four times MTPLX's idle level; for mlx-serve, which uses
+    /// none at rest, anything a request costs.
+    public static func activityThreshold(_ engine: EngineKind) -> Double { engine == .mlxServe ? 0.05 : 0.5 }
+
+    public static func check(_ server: LaunchedServer, cpuSeconds: Double?, logBytes: Int64? = nil, hasClients: Bool,
+                             now: Date = Date()) -> (server: LaunchedServer, stop: Bool) {
+        var updated = server
+        // Scaled by the time since the last check: after a sleep of the Mac, an hour of idle CPU is not a request.
+        let minutes = max(1, server.lastCheckedAt.map { now.timeIntervalSince($0) / 60 } ?? 1)
+        let usedCPU = cpuSeconds.flatMap { current in
+            server.lastCPUSeconds.map { current - $0 >= activityThreshold(server.engine) * minutes }
+        } ?? false
+        let logged = logBytes.flatMap { current in server.lastLogBytes.map { current != $0 } } ?? false
+        // No baseline yet (first check): count it as active, the loading itself used the CPU.
+        if hasClients || usedCPU || logged || server.lastCPUSeconds == nil { updated.lastActiveAt = now }
+        if let cpuSeconds { updated.lastCPUSeconds = cpuSeconds }
+        if let logBytes { updated.lastLogBytes = logBytes }
+        updated.lastCheckedAt = now
+        guard let minutes = server.idleStopAfterMinutes, cpuSeconds != nil else { return (updated, false) }
+        return (updated, now.timeIntervalSince(updated.activeSince) >= TimeInterval(minutes * 60))
+    }
+
+    /// Size of the server's log, which this app writes to.
+    public static func logBytes(_ server: LaunchedServer) -> Int64? {
+        (try? FileManager.default.attributesOfItem(atPath: server.logPath)[.size] as? NSNumber)?.int64Value
+    }
 }
 
 public final class LaunchRegistry: @unchecked Sendable {
@@ -159,7 +202,7 @@ public enum ModelLauncher {
 
     /// Starts the server in its own session (a Ctrl-C in the terminal that ran `llmarium start` does not reach it),
     /// logs to a file, waits until it serves, and records it as launched by this app.
-    public static func start(_ plan: LaunchPlan, model: LocalModel, registry: LaunchRegistry = .shared,
+    public static func start(_ plan: LaunchPlan, model: LocalModel, idleStopAfterMinutes: Int? = nil, registry: LaunchRegistry = .shared,
                              timeout: TimeInterval = 900) async -> StartResult {
         try? FileManager.default.createDirectory(at: AppPaths.logs, withIntermediateDirectories: true)
         let stamp = ISO8601DateFormatter().string(from: Date()).replacingOccurrences(of: ":", with: "-")
@@ -171,7 +214,8 @@ public enum ModelLauncher {
         }
         let startedAt = ProcessScanner.bsdInfo(of: pid)?.startedAt ?? begin
         let server = LaunchedServer(pid: pid, startedAt: startedAt, engine: plan.engine, model: model.name, port: plan.port,
-                                    context: plan.context, logPath: log.path, arguments: [plan.executable] + plan.arguments)
+                                    context: plan.context, logPath: log.path, arguments: [plan.executable] + plan.arguments,
+                                    idleStopAfterMinutes: idleStopAfterMinutes)
         registry.add(server)
 
         let deadline = begin.addingTimeInterval(timeout)
