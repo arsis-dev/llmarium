@@ -63,6 +63,14 @@ public struct StartOutcome: Sendable {
 }
 
 public enum ModelStarter {
+    /// A launch that worked goes to the menu bar's recent list.
+    static func remember(_ result: ModelLauncher.StartResult, model: LocalModel, engine: EngineKind, context: Int?) {
+        switch result {
+        case .ready, .loadedInOMLX: QuickLaunchStore.shared.record(modelID: model.id, engine: engine, context: context)
+        case .failed: break
+        }
+    }
+
     /// Re-reads memory now (not the snapshot the user looked at), refuses a model that does not fit unless `force`,
     /// then loads it in oMLX or starts an MTPLX / mlx-serve server for it.
     public static func start(_ model: LocalModel, engine: EngineKind, context: Int?, port: Int? = nil,
@@ -87,7 +95,9 @@ public enum ModelStarter {
             guard let id = EngineCompatibility.omlxID(for: model, snapshot: snapshot),
                   let url = omlx?.instances.first(where: { $0.api == .ok })?.url else { return refuse("oMLX ne répond pas.") }
             if omlx?.omlx?.models.first(where: { $0.id == id })?.loaded == true { return refuse("\(id) est déjà chargé dans oMLX.") }
-            return StartOutcome(estimate: estimate, result: await ModelLauncher.loadInOMLX(id, baseURL: url), refusal: nil)
+            let result = await ModelLauncher.loadInOMLX(id, baseURL: url)
+            remember(result, model: model, engine: engine, context: nil)
+            return StartOutcome(estimate: estimate, result: result, refusal: nil)
         case .mtplx, .mlxServe:
             if let serving = runtime.running.first(where: { $0.role.engine == engine && $0.models.contains(LaunchPlan.servedName(model)) }) {
                 return refuse("\(engine.title) sert déjà ce modèle (PID \(serving.pid), port \(serving.ports.map(String.init).joined(separator: ", "))).")
@@ -98,7 +108,9 @@ public enum ModelStarter {
             do {
                 let plan = try LaunchPlan.make(model: model, engine: engine, port: port,
                                                context: context ?? estimate.context, installation: installation, recipe: recipe)
-                return StartOutcome(estimate: estimate, result: await ModelLauncher.start(plan, model: model, idleStopAfterMinutes: idleStopAfterMinutes), refusal: nil)
+                let result = await ModelLauncher.start(plan, model: model, idleStopAfterMinutes: idleStopAfterMinutes)
+                remember(result, model: model, engine: engine, context: plan.context)
+                return StartOutcome(estimate: estimate, result: result, refusal: nil)
             } catch {
                 return refuse("\(error)")
             }

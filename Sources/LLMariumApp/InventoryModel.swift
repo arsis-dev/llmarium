@@ -67,28 +67,101 @@ final class InventoryModel: ObservableObject {
     @Published private(set) var launches: [String: LaunchJob] = [:]
     @Published var launchOutcome: ActionOutcome?
 
-    func launch(_ item: LocalModel, engine: EngineKind, context: Int?, force: Bool, idleStopAfterMinutes: Int? = nil) async {
-        guard launches[item.id] == nil, let snapshot else { return }
+    /// Returns true once the model serves. `quiet` skips the « est prêt » message (launches from the menu bar).
+    @discardableResult
+    func launch(_ item: LocalModel, engine: EngineKind, context: Int?, force: Bool, idleStopAfterMinutes: Int? = nil,
+                quiet: Bool = false) async -> Bool {
+        guard launches[item.id] == nil, let snapshot else { return false }
         launches[item.id] = LaunchJob(modelID: item.id, modelName: item.name, engine: engine, startedAt: Date())
         defer { launches[item.id] = nil }
         let outcome = await ModelStarter.start(item, engine: engine, context: context, snapshot: snapshot, force: force,
                                                idleStopAfterMinutes: idleStopAfterMinutes)
+        var ready = false
         if let refusal = outcome.refusal {
             launchOutcome = ActionOutcome(title: "\(item.name) n'a pas été lancé", message: refusal)
         } else {
             switch outcome.result {
             case .ready(let server, let served, let seconds):
-                launchOutcome = ActionOutcome(title: "\(served.first ?? item.name) est prêt",
-                                              message: "Chargé en \(seconds) s sur \(engine.title) : http://127.0.0.1:\(server.port)/v1")
+                ready = true
+                if !quiet {
+                    launchOutcome = ActionOutcome(title: "\(served.first ?? item.name) est prêt",
+                                                  message: "Chargé en \(seconds) s sur \(engine.title) : http://127.0.0.1:\(server.port)/v1")
+                }
             case .loadedInOMLX(let id, let seconds):
-                launchOutcome = ActionOutcome(title: "\(id) est chargé", message: "oMLX l'a chargé en \(seconds) s.")
+                ready = true
+                if !quiet { launchOutcome = ActionOutcome(title: "\(id) est chargé", message: "oMLX l'a chargé en \(seconds) s.") }
             case .failed(let reason, let log):
                 launchOutcome = ActionOutcome(title: "Échec du lancement de \(item.name)", message: reason + (log.map { "\n\n\($0)" } ?? ""))
             case nil:
                 break
             }
         }
+        // From the menu bar, a failure has nowhere to show but the window.
+        if quiet, launchOutcome != nil { AppWindows.showMain(self) }
         await refresh()
+        quickLaunch = QuickLaunchStore.shared.state()
+        return ready
+    }
+
+    // MARK: - Quick launch (menu bar)
+
+    @Published private(set) var quickLaunch = QuickLaunchStore.shared.state()
+    /// A model whose launch sheet the main window should open (the menu bar's « Lancer » when it does not fit).
+    @Published var pendingLaunch: LocalModel?
+
+    /// Minutes of inactivity before a model launched from the menu bar stops; 0 turns it off.
+    @Published var quickIdleMinutes = UserDefaults.standard.object(forKey: "quickIdleMinutes") as? Int ?? 30 {
+        didSet { UserDefaults.standard.set(quickIdleMinutes, forKey: "quickIdleMinutes") }
+    }
+
+    var quickItems: [QuickLaunchItem] {
+        snapshot.map { QuickLaunch.items(state: quickLaunch, snapshot: $0) } ?? []
+    }
+
+    func isPinned(_ item: LocalModel) -> Bool { quickLaunch.pinned.contains(item.id) }
+
+    func setPinned(_ item: LocalModel, _ pinned: Bool) {
+        QuickLaunchStore.shared.setPinned(item.id, pinned)
+        quickLaunch = QuickLaunchStore.shared.state()
+    }
+
+    /// One click from the menu bar: launch with the last engine and context; open the launch sheet instead when the
+    /// model does not fit; then, if asked, open it in a harness in the last project folder.
+    func quickLaunch(_ item: QuickLaunchItem, harness: HarnessKind? = nil) async {
+        guard let engine = item.engine, let snapshot else { return }
+        let estimate = MemoryPlanner.estimate(model: item.model, engine: engine, context: item.context, snapshot: snapshot)
+        if estimate.verdict == .tooLarge && engine != .omlx {
+            pendingLaunch = item.model
+            AppWindows.showMain(self, section: .models)
+            return
+        }
+        let idle = engine == .omlx || quickIdleMinutes == 0 ? nil : quickIdleMinutes
+        guard await launch(item.model, engine: engine, context: item.context, force: false, idleStopAfterMinutes: idle, quiet: true),
+              let harness, let current = self.snapshot else { return }
+        let served = LaunchPlan.servedName(item.model)
+        let targets = HarnessTarget.targets(in: current, via: ProxyController.shared.url).filter { $0.engine == engine }
+        guard let target = targets.first(where: { engine == .omlx ? OMLXIdentity.matches($0.modelID, item.model) : $0.modelID == served }) else {
+            launchOutcome = ActionOutcome(title: "\(item.model.name) est prêt", message: "Mais il n'apparaît pas encore dans « En cours » : ouvrez \(harness.title) depuis sa carte.")
+            AppWindows.showMain(self, section: .running)
+            return
+        }
+        if let reason = HarnessPlanner.unavailableReason(harness, target: target, installed: installedHarnesses) {
+            launchOutcome = ActionOutcome(title: "\(harness.title) ne peut pas s'ouvrir", message: reason)
+            AppWindows.showMain(self, section: .running)
+            return
+        }
+        let directory = UserDefaults.standard.string(forKey: "lastProjectFolder") ?? NSHomeDirectory()
+        do {
+            try HarnessOpener.open(try HarnessPlanner.prepare(harness, target: target, directory: directory))
+            if harness == .deepseekHarness {
+                launchOutcome = ActionOutcome(title: "DeepSeek Harness configuré",
+                                              message: "Choisissez « \(target.modelID) (local) » dans son sélecteur de modèle.")
+                AppWindows.showMain(self, section: .running)
+            }
+        } catch {
+            launchOutcome = ActionOutcome(title: "\(harness.title) ne s'est pas ouvert", message: "\(error)")
+            AppWindows.showMain(self, section: .running)
+        }
     }
 
     /// Benchmarks in progress, by model id served.

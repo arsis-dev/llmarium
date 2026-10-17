@@ -29,6 +29,9 @@ struct MainWindowView: View {
                 }
             }
             .navigationTitle(model.section.title)
+            .sheet(item: $model.pendingLaunch) { item in
+                LaunchSheet(item: item).environmentObject(model)
+            }
             .alert(model.launchOutcome?.title ?? "", isPresented: Binding(get: { model.launchOutcome != nil }, set: { if !$0 { model.launchOutcome = nil } }),
                    presenting: model.launchOutcome) { _ in
                 Button("OK", role: .cancel) {}
@@ -142,6 +145,9 @@ struct ModelsView: View {
                 Button("Copier le chemin") {
                     NSPasteboard.general.clearContents()
                     NSPasteboard.general.setString(item.path, forType: .string)
+                }
+                Button(model.isPinned(item) ? "Retirer de la barre de menus" : "Épingler dans la barre de menus") {
+                    model.setPinned(item, !model.isPinned(item))
                 }
                 Divider()
                 Button("Mettre à la corbeille…") { Task { trashPlan = await model.trashPlan(for: item) } }
