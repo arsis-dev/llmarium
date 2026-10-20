@@ -11,14 +11,19 @@ public struct RemoteProvider: Codable, Hashable, Sendable {
     public var models: [String]
     /// Ids starting with this prefix go to this provider, prefix removed (`cline/` for `cline/*`).
     public var prefix: String?
+    /// Set: no HTTP API and no key. The proxy runs this subscription's command-line tool for each chat completion,
+    /// reached by `prefix` only; `models` are then the suggested names listed by `/v1/models` (prefix added).
+    public var cli: SubscriptionCLI?
 
-    public init(id: String, name: String, openAIBase: String?, anthropicBase: String?, models: [String], prefix: String? = nil) {
+    public init(id: String, name: String, openAIBase: String?, anthropicBase: String?, models: [String], prefix: String? = nil,
+                cli: SubscriptionCLI? = nil) {
         self.id = id
         self.name = name
         self.openAIBase = openAIBase
         self.anthropicBase = anthropicBase
         self.models = models
         self.prefix = prefix
+        self.cli = cli
     }
 }
 
@@ -80,8 +85,17 @@ public struct Upstream: Equatable, Sendable {
     public var label: String
 }
 
+/// A chat completion answered by running a subscription's command-line tool on this Mac.
+public struct SubscriptionTarget: Equatable, Sendable {
+    public var cli: SubscriptionCLI
+    /// Passed to the tool's `--model` (`sonnet`, `gpt-6-luna`…).
+    public var model: String
+    public var providerID: String
+}
+
 public enum RouteResult: Equatable, Sendable {
     case upstream(Upstream)
+    case subscription(SubscriptionTarget)
     case notFound(String)
 }
 
@@ -132,6 +146,12 @@ public struct RouteTable: Sendable {
         // A local alias never falls back to a remote API.
         let candidates = alias == nil ? providers : providers.filter { $0.id == alias?.provider }
         for provider in candidates {
+            if let cli = provider.cli {
+                // Only chat completions, only by prefix: a bare « sonnet » must never start a process.
+                guard path == "/v1/chat/completions", let prefix = provider.prefix, model.hasPrefix(prefix),
+                      model.count > prefix.count else { continue }
+                return .subscription(SubscriptionTarget(cli: cli, model: String(model.dropFirst(prefix.count)), providerID: provider.id))
+            }
             var upstreamModel: String?
             if provider.models.contains(model) { upstreamModel = model }
             else if let prefix = provider.prefix, model.hasPrefix(prefix) { upstreamModel = String(model.dropFirst(prefix.count)) }
@@ -164,10 +184,17 @@ public struct RouteTable: Sendable {
             entries.append(["id": id, "object": "model", "created": Int(now.timeIntervalSince1970), "owned_by": owner])
         }
         for alias in aliases.keys.sorted() {
-            if case .upstream(let upstream) = resolve(model: alias, path: "/v1/chat/completions") { add(alias, owner: upstream.label) }
+            switch resolve(model: alias, path: "/v1/chat/completions") {
+            case .upstream(let upstream): add(alias, owner: upstream.label)
+            case .subscription(let target): add(alias, owner: target.providerID)
+            case .notFound: break
+            }
         }
         for server in servers { server.models.forEach { add($0, owner: server.label) } }
-        for provider in providers { provider.models.forEach { add($0, owner: provider.id) } }
+        for provider in providers {
+            let prefix = provider.cli == nil ? "" : provider.prefix ?? ""
+            provider.models.forEach { add(prefix + $0, owner: provider.id) }
+        }
         let body: [String: Any] = ["object": "list", "data": entries]
         return (try? JSONSerialization.data(withJSONObject: body, options: [.withoutEscapingSlashes])) ?? Data()
     }
@@ -242,7 +269,7 @@ public enum ProxyBody {
 
     public static func error(status: Int, message: String, type: String = "invalid_request_error") -> Data {
         let reason = [400: "Bad Request", 404: "Not Found", 411: "Length Required", 413: "Payload Too Large",
-                      502: "Bad Gateway", 503: "Service Unavailable"][status] ?? "Error"
+                      502: "Bad Gateway", 503: "Service Unavailable", 504: "Gateway Timeout"][status] ?? "Error"
         let body = (try? JSONSerialization.data(withJSONObject: ["error": ["message": message, "type": type, "code": status]],
                                                 options: [.withoutEscapingSlashes])) ?? Data()
         return response(status: status, reason: reason, body: body)

@@ -55,6 +55,8 @@ public final class ProxyServer: @unchecked Sendable {
     private var listeners: [NWListener] = []
     private let tableProvider: @Sendable () async -> RouteTable
     private let keyProvider: @Sendable (String) -> String?
+    /// Runs `claude -p` / `codex exec` for the subscription providers.
+    let subscriptions: SubscriptionRunner
     private let log: Logger
     private let tableLock = NSLock()
     private var table = RouteTable(aliases: [], servers: [], providers: [])
@@ -69,11 +71,13 @@ public final class ProxyServer: @unchecked Sendable {
 
     public init(port: Int, tableProvider: @escaping @Sendable () async -> RouteTable,
                 keyProvider: @escaping @Sendable (String) -> String? = { ProviderKeys.key(for: $0) },
+                subscriptions: SubscriptionRunner = SubscriptionRunner(),
                 refreshBudget: Duration = .seconds(3), upstreamIdleTimeout: TimeInterval = 300,
                 logFile: URL? = nil, log: @escaping Logger = { _ in }) {
         self.port = port
         self.tableProvider = tableProvider
         self.keyProvider = keyProvider
+        self.subscriptions = subscriptions
         self.refreshBudget = refreshBudget
         self.upstreamIdleTimeout = upstreamIdleTimeout
         self.logFile = logFile
@@ -321,6 +325,41 @@ final class ProxySession: @unchecked Sendable {
             let rewritten = ProxyBody.rewriting(body, model: upstream.model)
             forward(head.forwarded(to: upstream, bodyLength: rewritten.count, authorization: authorization) + rewritten,
                     to: upstream, label: "\(head.method) \(head.path) \(requested) → \(upstream.label) \(upstream.model)")
+        case .subscription(let target):
+            answer(target, body: body, label: "\(head.method) \(head.path) \(requested) → \(target.cli.executableName) \(target.model)",
+                   requested: requested)
+        }
+    }
+
+    /// Runs the subscription's tool off the session queue (a call takes seconds to minutes), then answers at once.
+    private func answer(_ target: SubscriptionTarget, body: Data, label: String, requested: String) {
+        guard let runner = server?.subscriptions else { return reply(ProxyBody.error(status: 503, message: "Point d'entrée arrêté.")) }
+        let request: SubscriptionRequest
+        do { request = try SubscriptionRequest.parse(body) } catch {
+            server?.logRequest("\(label) → 400 (\(error))")
+            return reply(ProxyBody.error(status: 400, message: "\(error)"))
+        }
+        Task { [self] in
+            let response: Data
+            var line: String
+            do {
+                let answer = try await runner.answer(request, target: target)
+                let shaped = SubscriptionResponse.body(answer, model: requested, stream: request.stream)
+                response = ProxyBody.response(status: 200, reason: "OK", body: shaped.data, contentType: shaped.contentType)
+                line = "200 en \(String(format: "%.1f", Date().timeIntervalSince(begin))) s · \(answer.inputTokens) → \(answer.outputTokens) tokens"
+                if let cost = answer.costUSD { line += String(format: " · %.4f $ équivalent API", cost) }
+            } catch let failure as SubscriptionFailure {
+                response = ProxyBody.error(status: failure.status, message: failure.description, type: failure.type)
+                line = "\(failure.status) en \(String(format: "%.1f", Date().timeIntervalSince(begin))) s (\(failure.description.prefix(200)))"
+            } catch {
+                response = ProxyBody.error(status: 502, message: "\(error)", type: "upstream_error")
+                line = "502 (\(error))"
+            }
+            let logged = line
+            queue.async {
+                self.server?.logRequest("\(label) → \(logged)")
+                self.reply(response)
+            }
         }
     }
 

@@ -24,6 +24,7 @@ struct LLMariumCLI {
       llmarium proxy import-litellm <fichier>   Reprend les alias et fournisseurs d'une config LiteLLM
       llmarium proxy port <N>                   Change le port du point d'entrée
       llmarium provider list | set-key <id> | remove-key <id>   Fournisseurs distants et leurs clés
+      llmarium provider add-subscriptions                   Claude et ChatGPT par claude -p et codex exec (abonnements)
       llmarium sync              Inscrit tous les modèles joignables dans Pi et DeepSeek Harness via le point d'entrée
       llmarium recipe [list] | show <modèle> | remove <modèle> | set <modèle> [--context N] [--reasoning on|off|auto]
                  [--temperature x] [--top-p x] [--top-k n] [--note "…"]
@@ -191,12 +192,27 @@ struct LLMariumCLI {
                 if config.providers.isEmpty { print("Aucun fournisseur distant. Importez-les avec llmarium proxy import-litellm <fichier>.") }
                 for provider in config.providers {
                     let scope = provider.prefix.map { "\($0)*" } ?? provider.models.joined(separator: ", ")
-                    print("\(provider.id) · \(provider.name) · \(scope) · clé \(ProviderKeys.hasKey(for: provider.id) ? "présente" : "absente")")
+                    let access = provider.cli.map { "abonnement via \(SubscriptionRunner.findExecutable($0)?.path ?? "\($0.executableName) introuvable")" }
+                        ?? "clé \(ProviderKeys.hasKey(for: provider.id) ? "présente" : "absente")"
+                    print("\(provider.id) · \(provider.name) · \(scope) · \(access)")
                 }
+            case "add-subscriptions":
+                // Claude and ChatGPT through their own command-line tools (`claude -p`, `codex exec`): no key.
+                var updated = config
+                for cli in SubscriptionCLI.allCases where !updated.providers.contains(where: { $0.id == cli.provider.id }) {
+                    updated.providers.append(cli.provider)
+                }
+                do { try updated.save() } catch { fail("\(error)") }
+                for cli in SubscriptionCLI.allCases {
+                    let provider = cli.provider
+                    print("\(provider.id) : \(provider.models.map { (provider.prefix ?? "") + $0 }.joined(separator: ", ")) · \(SubscriptionRunner.findExecutable(cli)?.path ?? "\(cli.executableName) introuvable")")
+                }
+                print("Enregistré dans \(ProxyConfig.file.path)")
             case "set-key", "remove-key":
-                guard let id = options.positional.dropFirst(2).first, config.providers.contains(where: { $0.id == id }) else {
+                guard let id = options.positional.dropFirst(2).first, let provider = config.providers.first(where: { $0.id == id }) else {
                     fail("Fournisseurs connus : \(config.providers.map(\.id).joined(separator: ", "))")
                 }
+                if provider.cli != nil { fail("\(id) passe par l'abonnement de son outil en ligne de commande : pas de clé.") }
                 if action == "remove-key" {
                     ProviderKeys.removeKey(for: id)
                     print("Clé \(id) retirée du trousseau.")
@@ -212,7 +228,7 @@ struct LLMariumCLI {
                 do { try ProviderKeys.setKey(key, for: id) } catch { fail("\(error)") }
                 print("Clé \(id) enregistrée dans le trousseau.")
             default:
-                fail("llmarium provider list | set-key <id> | remove-key <id>")
+                fail("llmarium provider list | add-subscriptions | set-key <id> | remove-key <id>")
             }
         case "proxy":
             let config = ProxyConfig.load()

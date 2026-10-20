@@ -122,6 +122,7 @@ struct ProxyView: View {
                             } else {
                                 StatePill(text: upstream.label, color: .green)
                             }
+                        case .subscription(let target): StatePill(text: "\(target.cli.executableName) · abonnement", color: .green)
                         case .notFound: StatePill(text: proxy.table == nil ? "—" : "Cible absente", color: .secondary)
                         }
                     } label: {
@@ -140,10 +141,15 @@ struct ProxyView: View {
                 if proxy.config.providers.isEmpty { Text("Aucune").foregroundStyle(.secondary) }
                 ForEach(proxy.config.providers, id: \.id) { provider in
                     LabeledContent {
-                        HStack {
-                            let hasKey = ProviderKeys.hasKey(for: provider.id)
-                            StatePill(text: hasKey ? "Clé enregistrée" : "Clé absente", color: hasKey ? .green : .orange)
-                            Button(hasKey ? "Remplacer…" : "Ajouter la clé…") { keyFor = provider }
+                        if let cli = provider.cli {
+                            let found = SubscriptionRunner.findExecutable(cli) != nil
+                            StatePill(text: found ? "Abonnement · \(cli.executableName)" : "\(cli.executableName) introuvable", color: found ? .green : .orange)
+                        } else {
+                            HStack {
+                                let hasKey = ProviderKeys.hasKey(for: provider.id)
+                                StatePill(text: hasKey ? "Clé enregistrée" : "Clé absente", color: hasKey ? .green : .orange)
+                                Button(hasKey ? "Remplacer…" : "Ajouter la clé…") { keyFor = provider }
+                            }
                         }
                     } label: {
                         Text(provider.name)
